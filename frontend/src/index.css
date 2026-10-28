@@ -1,0 +1,17 @@
+/* Keep your existing Tailwind directives if you use Tailwind — the new UI
+   does not depend on them, so they can be removed safely. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+    height: 100%;
+    margin: 0;
+    background: #050505;
+}
+
+body {
+    overflow: hidden;
+}

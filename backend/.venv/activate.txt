@@ -1,0 +1,2 @@
+1) to activate the virtual env: .\.venv\Scripts\Activate.ps1
+2) to start the backend server: python -m uvicorn main:app --reload --port 8000
