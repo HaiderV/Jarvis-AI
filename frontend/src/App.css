@@ -431,6 +431,20 @@ button {
   outline-offset: 6px;
 }
 
+.core-caption-group {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transition: opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1), transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.core-caption-group.is-hidden,
+.stage.has-subtitles .core-caption-group {
+  opacity: 0;
+  transform: translateY(6px);
+  pointer-events: none;
+}
+
 .core-state {
   position: absolute;
   left: 0;
@@ -542,12 +556,13 @@ button {
 .subtitles {
   position: absolute;
   left: 50%;
-  bottom: 32px;
-  transform: translateX(-50%) translateY(8px);
-  width: min(680px, 78%);
+  bottom: 24px;
+  transform: translateX(-50%) translateY(10px);
+  width: min(720px, 86%);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.34s ease, transform 0.34s var(--ease);
+  transition: opacity 0.32s ease, transform 0.32s var(--ease);
+  z-index: 8;
 }
 
 .subtitles.is-on {
@@ -555,24 +570,61 @@ button {
   transform: translateX(-50%) translateY(0);
 }
 
-.subtitles::before {
-  content: '';
-  display: block;
-  width: 40px;
-  height: 1px;
-  margin: 0 auto 14px;
-  background: rgba(255, 178, 87, 0.5);
+.subtitles-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: rgba(13, 10, 8, 0.82);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 178, 87, 0.2);
+  border-radius: 14px;
+  padding: 12px 24px 14px;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.75), 0 0 28px rgba(255, 178, 87, 0.05);
+  transition: border-color 0.2s ease;
+}
+
+.subtitles-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin-bottom: 6px;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--amber);
+  opacity: 0.95;
+}
+
+.subtitles-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--amber-hot);
+  box-shadow: 0 0 8px rgba(255, 178, 87, 0.8);
+  animation: core-blink 1.2s ease-in-out infinite;
+}
+
+.subtitles-label {
+  font-weight: 500;
 }
 
 .subtitles-body {
-  max-height: 3.4em;
-  overflow: hidden;
+  max-height: 4.8em;
+  overflow-y: auto;
+  scrollbar-width: none;
   text-align: center;
-  font-size: 16.5px;
-  line-height: 1.6;
-  letter-spacing: 0.004em;
+  font-size: 15px;
+  line-height: 1.55;
+  letter-spacing: 0.005em;
   color: var(--text-bright);
-  text-shadow: 0 1px 26px rgba(0, 0, 0, 0.92);
+  text-shadow: 0 1px 20px rgba(0, 0, 0, 0.9);
+}
+
+.subtitles-body::-webkit-scrollbar {
+  display: none;
 }
 
 .stage-error {

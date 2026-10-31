@@ -465,7 +465,7 @@ export function createJarvisCore(canvas: HTMLCanvasElement): JarvisCoreHandle {
 
                 const a0 = (i / 132) * TAU + spin + n * 0.12;
                 const dash = (TAU / 132) * (0.2 + n * 0.8);
-                const rad = R * scale * (0.99 + (n - 0.5) * 0.05);
+                const rad = Math.max(0.001, R * Math.max(0.001, scale) * (0.99 + (n - 0.5) * 0.05));
 
                 ctx.moveTo(cx + Math.cos(a0) * rad, cy + Math.sin(a0) * rad * 0.985);
                 ctx.arc(cx, cy, rad, a0, a0 + dash);
@@ -484,8 +484,11 @@ export function createJarvisCore(canvas: HTMLCanvasElement): JarvisCoreHandle {
             const rot = t * (0.5 + (g.seed % 3) * 0.35) + g.seed;
             const wob = Math.sin(t * 0.9 + g.seed) * 0.06;
 
-            const rx = R * (g.rad + wob) * scale;
+            const safeRad = Math.max(0.001, g.rad + wob);
+            const safeScale = Math.max(0.001, scale);
+            const rx = Math.max(0.001, R * safeRad * safeScale);
             const squash = 0.35 + Math.abs(Math.sin(g.tilt)) * 0.65;
+            const ry = Math.max(0.001, rx * squash);
 
             const a0 = g.a0 + rot;
             const n = fbm(t * 0.6 + g.seed, 3.9);
@@ -494,7 +497,7 @@ export function createJarvisCore(canvas: HTMLCanvasElement): JarvisCoreHandle {
             ctx.strokeStyle = rgba(i % 4 === 0 ? 0 : i % 3 === 0 ? 1 : 2, clamp(a, 0, 0.85));
             ctx.lineWidth = g.width;
             ctx.beginPath();
-            ctx.ellipse(cx, cy, rx, rx * squash, g.tilt + rot * 0.4, a0, a0 + g.len);
+            ctx.ellipse(cx, cy, rx, ry, g.tilt + rot * 0.4, a0, a0 + g.len);
             ctx.stroke();
         }
     }
@@ -503,16 +506,16 @@ export function createJarvisCore(canvas: HTMLCanvasElement): JarvisCoreHandle {
         const breathe = 1 + 0.03 * Math.sin(t * 0.6);
         const pulse = 0.55 + 0.45 * fbm(t * 0.8, 3.3) + 0.35 * glow;
 
-        const size = R * 0.42 * scale * breathe;
+        const size = Math.max(0, R * 0.42 * scale * breathe);
         ctx.globalAlpha = clamp((0.4 + 0.24 * cur.energy) * pulse, 0, 1);
         ctx.drawImage(sprites[1], cx - size / 2, cy - size / 2, size, size);
 
-        const hot = R * 0.14 * scale * breathe;
+        const hot = Math.max(0, R * 0.14 * scale * breathe);
         ctx.globalAlpha = clamp(0.75 * pulse, 0, 1);
         ctx.drawImage(sprites[0], cx - hot / 2, cy - hot / 2, hot, hot);
 
-        const flareW = R * 1.7 * scale * (0.9 + 0.15 * pulse);
-        const flareH = R * 0.028 * scale;
+        const flareW = Math.max(0, R * 1.7 * scale * (0.9 + 0.15 * pulse));
+        const flareH = Math.max(0, R * 0.028 * scale);
         ctx.globalAlpha = clamp(0.12 + 0.1 * cur.energy + 0.1 * glow, 0, 1);
         ctx.drawImage(sprites[1], cx - flareW / 2, cy - flareH / 2, flareW, flareH);
 
@@ -608,7 +611,7 @@ export function createJarvisCore(canvas: HTMLCanvasElement): JarvisCoreHandle {
 
         /* ---- slow breathing; never a jump ---- */
         const breath = state === 'speaking' ? Math.sin(t * 1.7) : 0;
-        const scale = cur.scale * (1 + 0.022 * breath);
+        const scale = Math.max(0.001, cur.scale * (1 + 0.022 * breath));
 
         const ry = t * 0.13 * cur.spin + ptr.x * 0.55;
         const rx = 0.24 + ptr.y * 0.4 + 0.09 * Math.sin(t * 0.06);
@@ -627,10 +630,10 @@ export function createJarvisCore(canvas: HTMLCanvasElement): JarvisCoreHandle {
         ctx.lineCap = 'round';
 
         // body of light behind everything, so the strands sit inside fire
-        const haze = R * 2.2 * scale;
+        const haze = Math.max(0, R * 2.2 * scale);
         ctx.globalAlpha = 0.13 + 0.06 * cur.energy + 0.05 * surge;
         ctx.drawImage(sprites[4], cx - haze / 2, cy - haze / 2, haze, haze);
-        const mid = R * 1.1 * scale;
+        const mid = Math.max(0, R * 1.1 * scale);
         ctx.globalAlpha = 0.11 + 0.05 * cur.energy;
         ctx.drawImage(sprites[3], cx - mid / 2, cy - mid / 2, mid, mid);
         ctx.globalAlpha = 1;

@@ -202,8 +202,8 @@ export const App: React.FC = () => {
     setRevealCount(0);
   }, []);
 
-  const LOCAL_TTS = 'http://localhost:8000/tts';
-  const LOCAL_VOICE = 'bm_george';
+  const LOCAL_TTS = import.meta.env.VITE_TTS_URL || '';
+  const LOCAL_VOICE = import.meta.env.VITE_TTS_VOICE || 'bm_george';
 
   const speakResponse = useCallback(
     async (raw: string) => {
@@ -227,30 +227,32 @@ export const App: React.FC = () => {
         }, 520);
       };
 
-      // 1. local neural voice, if the endpoint is up
-      try {
-        const res = await fetch(LOCAL_TTS, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: clean, voice: LOCAL_VOICE }),
-        });
-        if (res.ok) {
-          const url = URL.createObjectURL(new Blob([await res.arrayBuffer()], { type: 'audio/wav' }));
-          const audio = new Audio(url);
-          audio.onplay = () => setIsSpeaking(true);
-          audio.onended = () => {
-            URL.revokeObjectURL(url);
-            finish();
-          };
-          audio.onerror = () => {
-            URL.revokeObjectURL(url);
-            finish();
-          };
-          await audio.play();
-          return;
+      // 1. local neural voice, if configured and endpoint is up
+      if (LOCAL_TTS) {
+        try {
+          const res = await fetch(LOCAL_TTS, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: clean, voice: LOCAL_VOICE }),
+          });
+          if (res.ok) {
+            const url = URL.createObjectURL(new Blob([await res.arrayBuffer()], { type: 'audio/wav' }));
+            const audio = new Audio(url);
+            audio.onplay = () => setIsSpeaking(true);
+            audio.onended = () => {
+              URL.revokeObjectURL(url);
+              finish();
+            };
+            audio.onerror = () => {
+              URL.revokeObjectURL(url);
+              finish();
+            };
+            await audio.play();
+            return;
+          }
+        } catch {
+          /* fall through to browser voice */
         }
-      } catch {
-        /* fall through to browser voice */
       }
 
       // 2. fall back to Web Speech
@@ -519,7 +521,7 @@ export const App: React.FC = () => {
     coreState === 'listening'
       ? 'Listening — speak, then pause'
       : coreState === 'speaking'
-        ? 'Speaking'
+        ? ''
         : 'Click the core to speak';
 
   const suggestions = [
@@ -608,7 +610,7 @@ export const App: React.FC = () => {
         </aside>
 
         {/* ------------------------------------------------- center: stage */}
-        <main className="stage">
+        <main className={`stage${subtitleOn ? ' has-subtitles' : ''}`}>
           <button
             type="button"
             className={`edge-toggle edge-left${historyOpen ? '' : ' is-closed'}`}
@@ -641,6 +643,7 @@ export const App: React.FC = () => {
                 onActivate={toggleListening}
                 label={stateLabel}
                 hint={stateHint}
+                showCaption={!subtitleOn}
               />
             </div>
           </div>
@@ -657,8 +660,14 @@ export const App: React.FC = () => {
           ) : null}
 
           <div className={`subtitles${subtitleOn ? ' is-on' : ''}`} aria-live="polite">
-            <div className="subtitles-body" ref={subtitleRef}>
-              {revealedText}
+            <div className="subtitles-card">
+              <div className="subtitles-header">
+                <span className="subtitles-dot" />
+                <span className="subtitles-label">SPEAKING</span>
+              </div>
+              <div className="subtitles-body" ref={subtitleRef}>
+                {revealedText}
+              </div>
             </div>
           </div>
         </main>

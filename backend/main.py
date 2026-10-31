@@ -1,4 +1,7 @@
 from typing import Optional, List, Dict, Any
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -32,7 +35,23 @@ async def root():
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "ok"}
+    from app.llm.ollama_client import get_ollama_http_client, OLLAMA_BASE_URL
+    ollama_status = "disconnected"
+    try:
+        client = get_ollama_http_client()
+        res = await client.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=2.0)
+        if res.status_code == 200:
+            ollama_status = "connected"
+    except Exception:
+        pass
+    return {"status": "ok", "ollama": ollama_status}
+
+@app.post("/tts")
+async def tts_endpoint():
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Backend neural TTS is not configured. Jarvis frontend uses the browser Web Speech API."
+    )
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
@@ -51,7 +70,7 @@ async def chat_endpoint(request: ChatRequest):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=err_msg)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err_msg)
     except RuntimeError as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
     except Exception:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An internal server error occurred.")
 

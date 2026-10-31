@@ -100,15 +100,13 @@ export const JarvisCore = forwardRef<JarvisCoreRef, Props>(function JarvisCore(
                 aria-label={state === 'listening' ? 'Stop listening' : 'Speak to Jarvis'}
             />
 
-            {showCaption ? (
-                <>
-                    <div className={`core-state ${state}`}>
-                        <span className="core-state-dot" />
-                        <span>{label ?? state}</span>
-                    </div>
-                    {hint ? <p className="core-hint">{hint}</p> : null}
-                </>
-            ) : null}
+            <div className={`core-caption-group${showCaption ? '' : ' is-hidden'}`}>
+                <div className={`core-state ${state}`}>
+                    <span className="core-state-dot" />
+                    <span>{label ?? state}</span>
+                </div>
+                {hint ? <p className="core-hint">{hint}</p> : null}
+            </div>
         </div>
     );
 });

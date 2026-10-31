@@ -4,7 +4,8 @@ import asyncio
 import httpx
 from typing import List, Dict, Any, AsyncGenerator, Optional
 
-OLLAMA_CHAT_URL = "http://127.0.0.1:11434/api/chat"
+OLLAMA_BASE_URL = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
+OLLAMA_CHAT_URL = f"{OLLAMA_BASE_URL}/api/chat"
 MODEL_NAME = os.getenv("JARVIS_MODEL", "qwen2.5:3b")
 KEEP_ALIVE = "1h"
 CPU_THREADS = min(8, os.cpu_count() or 8)

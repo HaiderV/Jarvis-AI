@@ -2,6 +2,7 @@ import json
 import re
 import sys
 import time
+import httpx
 from pathlib import Path
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from app.llm.ollama_client import generate_chat_completion, stream_chat_completion
@@ -476,10 +477,13 @@ async def process_message(
 
     while tool_round < MAX_TOOL_ROUNDS:
         t_llm_start = time.perf_counter()
-        res = await generate_chat_completion(
-            messages=model_payload,
-            tools=CONVERSATION_TOOLS if needs_tool_check else None,
-        )
+        try:
+            res = await generate_chat_completion(
+                messages=model_payload,
+                tools=CONVERSATION_TOOLS if needs_tool_check else None,
+            )
+        except (httpx.ConnectError, httpx.RequestError) as err:
+            raise RuntimeError("Unable to connect to Ollama. Please make sure Ollama is running (`ollama serve`).") from err
         tracker.record("ollama_llm_ms", (time.perf_counter() - t_llm_start) * 1000)
 
         if isinstance(res, dict):
@@ -517,7 +521,10 @@ async def process_message(
 
     if not final_reply and tool_round > 0:
         t_pass2_start = time.perf_counter()
-        fallback_res = await generate_chat_completion(messages=model_payload, tools=None)
+        try:
+            fallback_res = await generate_chat_completion(messages=model_payload, tools=None)
+        except (httpx.ConnectError, httpx.RequestError) as err:
+            raise RuntimeError("Unable to connect to Ollama. Please make sure Ollama is running (`ollama serve`).") from err
         tracker.record("ollama_pass2_ms", (time.perf_counter() - t_pass2_start) * 1000)
         final_reply = fallback_res.get("content", "") if isinstance(fallback_res, dict) else str(fallback_res)
 
@@ -631,10 +638,18 @@ async def process_message_stream(
     tool_round = 0
     while needs_tool_check and tool_round < MAX_TOOL_ROUNDS:
         t_llm_start = time.perf_counter()
-        res = await generate_chat_completion(
-            messages=model_payload,
-            tools=CONVERSATION_TOOLS,
-        )
+        try:
+            res = await generate_chat_completion(
+                messages=model_payload,
+                tools=CONVERSATION_TOOLS,
+            )
+        except (httpx.ConnectError, httpx.RequestError):
+            err_msg = "I'm having trouble connecting to Ollama. Please make sure Ollama is running (`ollama serve`)."
+            yield f"event: chunk\ndata: {json.dumps({'text': err_msg})}\n\n"
+            repository.add_message(conversation_id=active_conv_id, role="assistant", content=err_msg)
+            yield f"event: meta\ndata: {json.dumps({'conversation_id': active_conv_id, 'metrics': tracker.get_summary()})}\n\n"
+            yield "event: done\ndata: [DONE]\n\n"
+            return
         tracker.record("ollama_llm_ms", (time.perf_counter() - t_llm_start) * 1000)
 
         tool_calls = res.get("tool_calls", []) if isinstance(res, dict) else []
@@ -674,9 +689,17 @@ async def process_message_stream(
     # 4. Stream tokens directly to client
     full_text_acc = []
     t_stream_start = time.perf_counter()
-    async for text_chunk in stream_chat_completion(model_payload):
-        full_text_acc.append(text_chunk)
-        yield f"event: chunk\ndata: {json.dumps({'text': text_chunk})}\n\n"
+    try:
+        async for text_chunk in stream_chat_completion(model_payload):
+            full_text_acc.append(text_chunk)
+            yield f"event: chunk\ndata: {json.dumps({'text': text_chunk})}\n\n"
+    except (httpx.ConnectError, httpx.RequestError):
+        err_msg = "I'm having trouble connecting to Ollama. Please make sure Ollama is running (`ollama serve`)."
+        yield f"event: chunk\ndata: {json.dumps({'text': err_msg})}\n\n"
+        repository.add_message(conversation_id=active_conv_id, role="assistant", content=err_msg)
+        yield f"event: meta\ndata: {json.dumps({'conversation_id': active_conv_id, 'metrics': tracker.get_summary()})}\n\n"
+        yield "event: done\ndata: [DONE]\n\n"
+        return
     tracker.record("ollama_stream_ms", (time.perf_counter() - t_stream_start) * 1000)
 
     full_reply = "".join(full_text_acc).strip()
