@@ -118,6 +118,7 @@ button {
   flex: 0 0 56px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   padding: 0 22px;
   border-bottom: 1px solid var(--line);
   background: var(--ink);
@@ -131,6 +132,46 @@ button {
   color: var(--text-bright);
   text-indent: 0.44em;
   user-select: none;
+}
+
+.engine-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s ease;
+}
+
+.engine-badge:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: var(--line-strong);
+  color: var(--text-bright);
+}
+
+.engine-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.engine-dot.is-cloud {
+  background: #34d399;
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.5);
+}
+
+.engine-dot.is-local {
+  background: var(--amber);
+  box-shadow: 0 0 8px rgba(255, 178, 87, 0.5);
 }
 
 /* ==========================================================================
@@ -426,6 +467,11 @@ button {
   -webkit-tap-highlight-color: transparent;
 }
 
+.core-hit:disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .core-hit:focus-visible {
   outline: 1px solid rgba(255, 178, 87, 0.5);
   outline-offset: 6px;
@@ -481,6 +527,16 @@ button {
 
 .core-state.listening .core-state-dot {
   animation: core-blink 0.9s ease-in-out infinite;
+}
+
+.core-state.thinking {
+  color: #ffb84d;
+}
+
+.core-state.thinking .core-state-dot {
+  background: #ffb84d;
+  box-shadow: 0 0 8px rgba(255, 184, 77, 0.85);
+  animation: core-blink 0.4s ease-in-out infinite;
 }
 
 .core-state.speaking {
@@ -913,10 +969,21 @@ button {
   transition: color 0.16s, border-color 0.16s, background 0.16s;
 }
 
-.composer-mic:hover,
+.composer-mic:hover:not(:disabled),
 .composer-send:hover:not(:disabled) {
   color: var(--amber);
   border-color: var(--amber-line);
+}
+
+.composer-mic:disabled {
+  opacity: 0.32;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.composer-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .composer-mic.is-on {

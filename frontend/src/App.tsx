@@ -8,6 +8,7 @@ import {
 } from './services/api';
 import { JarvisCore, type JarvisCoreRef } from './components/JarvisCore';
 import type { CoreState } from './core/jarvisCore';
+import { LocalSpeechRecognition } from './services/stt';
 import './App.css';
 
 interface DisplayMessage {
@@ -42,40 +43,64 @@ function cleanForSpeech(raw: string): string {
 
 /* ── voice selection ─────────────────────────────────────────────── */
 
-// To lock one exact voice, put part of its name here, e.g. 'Google UK English Male'
+// To lock one exact voice, put part of its name here, e.g. 'Microsoft David' or 'Microsoft George'
 const VOICE_HINT: string = '';
 
-const MALE = /daniel|arthur|oliver|george|ryan|guy|thomas|james|male/i;
+const MALE = /daniel|arthur|oliver|george|ryan|guy|thomas|james|david|mark|male/i;
 const FEMALE = /female|zira|samantha|karen|moira|tessa|serena|fiona|susan|hazel|libby|sonia/i;
 
-function pickVoice(): SpeechSynthesisVoice | undefined {
+function pickVoice(isOnline: boolean = true): SpeechSynthesisVoice | undefined {
   const voices = window.speechSynthesis?.getVoices?.() ?? [];
   if (!voices.length) return undefined;
 
+  // Cloud voices check: Google voices, Edge Online/Natural voices require internet!
+  const isCloudVoice = (v: SpeechSynthesisVoice) => {
+    return /google|online|natural|cloud|server/i.test(v.name);
+  };
+
+  // If offline, strictly filter OUT any cloud voice
+  const candidateVoices = isOnline
+    ? voices
+    : voices.filter((v) => !isCloudVoice(v));
+
+  // If offline and no local voices matched, return undefined so browser uses default OS voice
+  if (!isOnline && candidateVoices.length === 0) {
+    return undefined;
+  }
+
   if (VOICE_HINT) {
     const hint = VOICE_HINT.toLowerCase();
-    const exact = voices.find((v) =>
-      v.name.toLowerCase().includes(hint),
-    );
+    const exact = candidateVoices.find((v) => v.name.toLowerCase().includes(hint));
     if (exact) return exact;
   }
 
   const score = (v: SpeechSynthesisVoice) => {
     let s = 0;
+    // Prefer English
     if (/^en-GB/i.test(v.lang)) s += 40;        // JARVIS is British RP
-    else if (/^en-IN/i.test(v.lang)) s += 16;
+    else if (/^en-IN/i.test(v.lang)) s += 25;
+    else if (/^en-US/i.test(v.lang)) s += 20;
     else if (/^en/i.test(v.lang)) s += 10;
     else return -1;
-    if (/google uk english male/i.test(v.name)) s += 30;
-    if (MALE.test(v.name)) s += 14;
-    if (FEMALE.test(v.name)) s -= 30;
-    if (/natural|neural|online/i.test(v.name)) s += 8;
+
+    // In online mode, Google UK English Male is great
+    if (isOnline && /google uk english male/i.test(v.name)) s += 30;
+    if (isOnline && /natural|neural/i.test(v.name)) s += 15;
+
+    // Local Windows voices (always works offline)
+    if (/george/i.test(v.name)) s += 35;
+    if (/david/i.test(v.name)) s += 25;
+    if (/mark/i.test(v.name)) s += 20;
+    if (MALE.test(v.name)) s += 10;
+    if (FEMALE.test(v.name)) s -= 20;
     return s;
   };
 
-  return [...voices]
+  const sorted = [...candidateVoices]
     .filter((v) => score(v) >= 0)
-    .sort((a, b) => score(b) - score(a))[0];
+    .sort((a, b) => score(b) - score(a));
+
+  return sorted[0] || (isOnline ? candidateVoices[0] : undefined);
 }
 
 
@@ -118,6 +143,35 @@ export const App: React.FC = () => {
   const [historyOpen, setHistoryOpen] = useState(true);
   const [chatOpen, setChatOpen] = useState(true);
 
+  /* network & speech engine mode */
+  const [isOnline, setIsOnline] = useState<boolean>(
+    typeof navigator !== 'undefined' ? navigator.onLine : true,
+  );
+  const [speechMode, setSpeechMode] = useState<'auto' | 'cloud' | 'local'>('auto');
+
+  useEffect(() => {
+    const onOnline = () => {
+      setIsOnline(true);
+      setSpeechMode('auto');
+    };
+    const onOffline = () => {
+      setIsOnline(false);
+      setSpeechMode('local');
+    };
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, []);
+
+  const effectiveEngine: 'cloud' | 'local' = useMemo(() => {
+    if (speechMode === 'cloud') return 'cloud';
+    if (speechMode === 'local') return 'local';
+    return isOnline ? 'cloud' : 'local';
+  }, [speechMode, isOnline]);
+
   /* voice */
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -133,7 +187,8 @@ export const App: React.FC = () => {
   const coreRef = useRef<JarvisCoreRef>(null);
   const idRef = useRef(0);
   const loadingRef = useRef(false);
-  const recognitionRef = useRef<any>(null);
+  const localSttRef = useRef<LocalSpeechRecognition | null>(null);
+  const cloudRecognitionRef = useRef<any>(null);
   const transcriptRef = useRef('');
   const sentRef = useRef(false);
   const hideTimerRef = useRef<number | null>(null);
@@ -143,7 +198,13 @@ export const App: React.FC = () => {
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
   const nextId = () => `m${++idRef.current}`;
-  const coreState: CoreState = isSpeaking ? 'speaking' : isListening ? 'listening' : 'idle';
+  const coreState: CoreState = isSpeaking
+    ? 'speaking'
+    : isListening
+      ? 'listening'
+      : isLoading
+        ? 'thinking'
+        : 'idle';
 
   /* ------------------------------------------------------------ scrolling */
 
@@ -258,11 +319,18 @@ export const App: React.FC = () => {
       // 2. fall back to Web Speech
       if (!('speechSynthesis' in window)) return;
       window.speechSynthesis.cancel();
+
+      const isCloud = effectiveEngine === 'cloud' && isOnline;
+      const voice = pickVoice(isCloud);
+
       const utterance = new SpeechSynthesisUtterance(clean);
-      const voice = pickVoice();
-      if (voice) utterance.voice = voice;
+      if (voice) {
+        utterance.voice = voice;
+        utterance.lang = voice.lang;
+      }
       utterance.rate = SPEECH_RATE;
-      utterance.pitch = 0.88;
+      // Standard pitch 1.0 for clean local Windows SAPI playback
+      utterance.pitch = isCloud ? 0.92 : 1.0;
       utterance.volume = 1;
       utterance.onstart = () => setIsSpeaking(true);
       utterance.onboundary = (e: SpeechSynthesisEvent) => {
@@ -272,13 +340,26 @@ export const App: React.FC = () => {
         }
       };
       utterance.onend = finish;
-      utterance.onerror = () => {
+      utterance.onerror = (e) => {
+        console.warn('[TTS] Synthesis error:', e);
         setIsSpeaking(false);
         setSubtitleOn(false);
       };
-      window.speechSynthesis.speak(utterance);
+
+      // Workaround for Chrome bug where calling speak immediately after cancel drops audio
+      window.setTimeout(() => {
+        try {
+          if (window.speechSynthesis.paused) {
+            window.speechSynthesis.resume();
+          }
+          window.speechSynthesis.speak(utterance);
+        } catch (err) {
+          console.warn('[TTS] Speak failed:', err);
+          finish();
+        }
+      }, 30);
     },
-    [voiceEnabled],
+    [voiceEnabled, effectiveEngine, isOnline],
   );
 
   // progressive subtitle reveal (also drives the core's speech pulses)
@@ -310,37 +391,48 @@ export const App: React.FC = () => {
 
   /* ---------------------------------------------------------- recognition */
 
-  const stopListening = useCallback(() => {
-    try {
-      recognitionRef.current?.stop();
-    } catch {
-      /* noop */
+  const startLocalListening = useCallback(() => {
+    if (!localSttRef.current) {
+      localSttRef.current = new LocalSpeechRecognition({
+        onStateChange: (listening) => {
+          setIsListening(listening);
+          if (!listening) {
+            setLiveTranscript('');
+          }
+        },
+        onTranscript: (text, isFinal) => {
+          const trimmed = text.trim();
+          transcriptRef.current = trimmed;
+          setLiveTranscript(trimmed);
+          if (isFinal && trimmed && !sentRef.current) {
+            sentRef.current = true;
+            executeMessage(trimmed);
+          }
+        },
+        onError: (err) => {
+          setVoiceError(err);
+          setIsListening(false);
+        },
+      });
     }
-    setIsListening(false);
+
+    localSttRef.current.start().catch((err) => {
+      setIsListening(false);
+      setVoiceError(err?.message || 'Could not start offline microphone.');
+    });
   }, []);
 
-  const toggleListening = useCallback(() => {
-    if (isListening) {
-      stopListening();
-      return;
-    }
-
+  const startCloudListening = useCallback(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      setVoiceError('Voice input needs Chrome or Edge.');
+      startLocalListening();
       return;
     }
-
-    setVoiceError(null);
-    stopSpeaking();
 
     const recognition = new SpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = true;
     recognition.lang = 'en-IN';
-
-    transcriptRef.current = '';
-    sentRef.current = false;
 
     recognition.onstart = () => {
       setIsListening(true);
@@ -356,8 +448,17 @@ export const App: React.FC = () => {
 
     recognition.onerror = (event: any) => {
       setIsListening(false);
-      if (event?.error === 'not-allowed') setVoiceError('Microphone permission denied.');
-      else if (event?.error && event.error !== 'no-speech') setVoiceError('Voice input failed.');
+      if (event?.error === 'network') {
+        console.warn('[STT] Network error detected. Automatically switching to offline STT.');
+        setIsOnline(false);
+        setSpeechMode('local');
+        setVoiceError('No internet connection. Switched to offline STT.');
+        startLocalListening();
+      } else if (event?.error === 'not-allowed') {
+        setVoiceError('Microphone permission denied.');
+      } else if (event?.error && event.error !== 'no-speech') {
+        setVoiceError('Voice input error: ' + event.error);
+      }
     };
 
     recognition.onend = () => {
@@ -371,14 +472,49 @@ export const App: React.FC = () => {
       }
     };
 
-    recognitionRef.current = recognition;
+    cloudRecognitionRef.current = recognition;
     try {
       recognition.start();
     } catch {
-      setIsListening(false);
-      setVoiceError('Could not start the microphone.');
+      startLocalListening();
     }
-  }, [isListening, stopListening, stopSpeaking]);
+  }, [startLocalListening]);
+
+  const stopListening = useCallback(() => {
+    try {
+      cloudRecognitionRef.current?.stop();
+    } catch {}
+    try {
+      localSttRef.current?.stop();
+    } catch {}
+    setIsListening(false);
+  }, []);
+
+  const toggleListening = useCallback(() => {
+    if (isLoading || loadingRef.current) return;
+    if (isListening) {
+      stopListening();
+      return;
+    }
+
+    setVoiceError(null);
+    stopSpeaking();
+    transcriptRef.current = '';
+    sentRef.current = false;
+
+    if (effectiveEngine === 'cloud' && navigator.onLine) {
+      startCloudListening();
+    } else {
+      startLocalListening();
+    }
+  }, [isLoading, isListening, stopListening, stopSpeaking, effectiveEngine, startCloudListening, startLocalListening]);
+
+  useEffect(() => {
+    return () => {
+      localSttRef.current?.stop();
+      cloudRecognitionRef.current?.stop();
+    };
+  }, []);
 
   /* ------------------------------------------------------------ messaging */
 
@@ -489,6 +625,7 @@ export const App: React.FC = () => {
   const handleComposerKey = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
+      if (isLoading || loadingRef.current) return;
       executeMessage(input);
     }
   };
@@ -516,13 +653,22 @@ export const App: React.FC = () => {
 
   /* ---------------------------------------------------------------- render */
 
-  const stateLabel = coreState === 'listening' ? 'LISTENING' : coreState === 'speaking' ? 'SPEAKING' : 'IDLE';
+  const stateLabel =
+    coreState === 'listening'
+      ? 'LISTENING'
+      : coreState === 'speaking'
+        ? 'SPEAKING'
+        : coreState === 'thinking'
+          ? 'THINKING'
+          : 'IDLE';
   const stateHint =
     coreState === 'listening'
       ? 'Listening — speak, then pause'
       : coreState === 'speaking'
         ? ''
-        : 'Click the core to speak';
+        : coreState === 'thinking'
+          ? 'Jarvis is processing…'
+          : 'Click the core to speak';
 
   const suggestions = [
     'What time is it?',
@@ -557,6 +703,20 @@ export const App: React.FC = () => {
 
       <header className="nav">
         <span className="nav-brand">JARVIS</span>
+        <button
+          type="button"
+          className="engine-badge"
+          onClick={() => {
+            const next = effectiveEngine === 'cloud' ? 'local' : 'cloud';
+            setSpeechMode(next);
+          }}
+          title="Click to toggle speech engine: Cloud (Online) / Sherpa (Offline)"
+        >
+          <span className={`engine-dot ${effectiveEngine === 'cloud' ? 'is-cloud' : 'is-local'}`} />
+          <span className="engine-text">
+            {effectiveEngine === 'cloud' ? 'Cloud STT (Online)' : 'Sherpa STT (Offline)'}
+          </span>
+        </button>
       </header>
 
       <div className="workspace">
@@ -641,6 +801,7 @@ export const App: React.FC = () => {
                 ref={coreRef}
                 state={coreState}
                 onActivate={toggleListening}
+                disabled={isLoading || coreState === 'thinking'}
                 label={stateLabel}
                 hint={stateHint}
                 showCaption={!subtitleOn}
@@ -741,8 +902,9 @@ export const App: React.FC = () => {
                 type="button"
                 className={`composer-mic${isListening ? ' is-on' : ''}`}
                 onClick={toggleListening}
+                disabled={isLoading || isLoadingMessages}
                 aria-label="Voice input"
-                title="Voice input"
+                title={isLoading ? 'Jarvis is processing…' : 'Voice input'}
               >
                 <MicIcon />
               </button>
@@ -752,16 +914,22 @@ export const App: React.FC = () => {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleComposerKey}
-                placeholder={isListening ? 'Listening…' : 'Message Jarvis'}
+                placeholder={
+                  isListening
+                    ? 'Listening…'
+                    : isLoading
+                      ? 'Jarvis is processing…'
+                      : 'Message Jarvis'
+                }
                 rows={1}
-                disabled={isLoadingMessages}
+                disabled={isLoading || isLoadingMessages}
               />
               <button
                 type="submit"
                 className="composer-send"
                 disabled={isLoading || !input.trim()}
                 aria-label="Send"
-                title="Send"
+                title={isLoading ? 'Jarvis is processing…' : 'Send'}
               >
                 <SendIcon />
               </button>

@@ -17,6 +17,7 @@ interface Props {
     hint?: string;
     /** set false for a completely bare core with no text at all */
     showCaption?: boolean;
+    disabled?: boolean;
 }
 
 /**
@@ -25,7 +26,7 @@ interface Props {
  * into the page on its own.
  */
 export const JarvisCore = forwardRef<JarvisCoreRef, Props>(function JarvisCore(
-    { state, onActivate, label, hint, showCaption = true },
+    { state, onActivate, label, hint, showCaption = true, disabled = false },
     ref,
 ) {
     const hostRef = useRef<HTMLDivElement>(null);
@@ -97,7 +98,14 @@ export const JarvisCore = forwardRef<JarvisCoreRef, Props>(function JarvisCore(
                 type="button"
                 className="core-hit"
                 onClick={onActivate}
-                aria-label={state === 'listening' ? 'Stop listening' : 'Speak to Jarvis'}
+                disabled={disabled}
+                aria-label={
+                    state === 'listening'
+                        ? 'Stop listening'
+                        : state === 'thinking'
+                            ? 'Processing query'
+                            : 'Speak to Jarvis'
+                }
             />
 
             <div className={`core-caption-group${showCaption ? '' : ' is-hidden'}`}>

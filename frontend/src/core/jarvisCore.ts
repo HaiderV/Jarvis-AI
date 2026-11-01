@@ -1,29 +1,25 @@
 /**
- * jarvisCore.ts — v3
+ * jarvisCore.ts — v4 (Stark Holographic Core)
  * ---------------------------------------------------------------------------
- * A sphere woven out of fire.
- *
- * The body is not a cloud of dust: it is ~200 long glowing strands, each one
- * an arc of a great circle wrapped around the sphere, drawn as a thin curved
- * polyline. Where the strands turn edge-on at the silhouette they pile up and
- * the rim lights up on its own, which is exactly how the reference reads.
- *
- *  - 3D: every strand point is a real sphere point, rotated by a matrix and
- *    perspective-projected, so the ball tumbles in space instead of spinning
- *    flat.
- *  - Crisp: the canvas is cleared every frame. No trails, nothing smears.
- *  - No sudden jumps. Every size change is eased; the only rhythm is a slow
- *    breathing curve that never restarts.
- *  - Open: no frame, no cage. Strands fray and fade into the page.
- *
- * States: idle / listening / thinking / speaking.
+ * A 3D holographic sphere modeled after Tony Stark's JARVIS AI core:
+ *  - Concentric 3D gimbal rings with tech tick graduations and segmented tracks.
+ *  - 3D spherical tech cage with longitude meridians and latitude parallels.
+ *  - High-intensity central plasma arc reactor / nucleus with radiant bloom.
+ *  - Distinct, expressive state-driven animations:
+ *      * IDLE: Majestic slow gyroscopic tumble, calm breathing, ambient sparks.
+ *      * LISTENING: Rings face viewer like an acoustic dish, micro-frequency
+ *                   soundwave ripples vibrating along the tracks, focused eye.
+ *      * THINKING: High-speed counter-rotating gyroscopes, rapid computation
+ *                  strobing in the core, streaming data dashes, scan beam.
+ *      * SPEAKING: Resonant vocal expansion, expanding acoustic shockwaves
+ *                  synchronized with word delivery, warm radiant bloom.
  */
 
 export type CoreState = 'idle' | 'listening' | 'thinking' | 'speaking';
 
 export interface JarvisCoreHandle {
     setState(next: CoreState): void;
-    /** brightens the core briefly — never changes its size */
+    /** brightens the core and triggers vocal acoustic shockwave */
     pulse(strength?: number): void;
     setPointer(x: number, y: number, inside: boolean): void;
     resize(width: number, height: number, dpr: number): void;
@@ -34,44 +30,20 @@ const TAU = Math.PI * 2;
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 const lerp = (a: number, b: number, k: number) => a + (b - a) * k;
 
-/* ------------------------------------------------------------------ noise */
-
-function hash1(n: number): number {
-    const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
-    return x - Math.floor(x);
-}
-
-function vnoise(x: number, seed: number): number {
-    const i = Math.floor(x);
-    const f = x - i;
-    const a = hash1(i + seed * 13.13);
-    const b = hash1(i + 1 + seed * 13.13);
-    const u = f * f * (3 - 2 * f);
-    return a + (b - a) * u;
-}
-
-function fbm(x: number, seed: number): number {
-    return (
-        vnoise(x, seed) * 0.62 +
-        vnoise(x * 2.17, seed + 3.7) * 0.26 +
-        vnoise(x * 4.41, seed + 9.1) * 0.12
-    );
-}
-
-/* ---------------------------------------------------------------- palette */
+/* ------------------------------------------------------------------ palette */
 
 const PALETTE: [number, number, number][] = [
-    [255, 247, 218], // 0 white hot
-    [255, 226, 152], // 1 pale gold
-    [255, 197, 84], // 2 gold
-    [255, 158, 38], // 3 amber
-    [233, 108, 14], // 4 orange
-    [170, 56, 4], // 5 deep ember
+    [255, 252, 240], // 0: Incandescent White-hot Core
+    [255, 228, 140], // 1: Pale Radiant Gold
+    [255, 185, 50],  // 2: Stark Pure Gold
+    [255, 135, 20],  // 3: Warm Amber
+    [225, 80, 10],   // 4: Vivid Flame Orange
+    [150, 35, 5],    // 5: Deep Holographic Ember
 ];
 
 const rgba = (tint: number, a: number) => {
-    const c = PALETTE[tint];
-    return `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+    const c = PALETTE[clamp(tint, 0, PALETTE.length - 1)];
+    return `rgba(${c[0]},${c[1]},${c[2]},${clamp(a, 0, 1)})`;
 };
 
 function makeSprite(tint: number, tight = 1): HTMLCanvasElement {
@@ -83,44 +55,70 @@ function makeSprite(tint: number, tight = 1): HTMLCanvasElement {
     const [r, g, b] = PALETTE[tint];
     const grad = c.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
     grad.addColorStop(0, `rgba(${r},${g},${b},1)`);
-    grad.addColorStop(0.16 * tight, `rgba(${r},${g},${b},0.72)`);
-    grad.addColorStop(0.42 * tight, `rgba(${r},${g},${b},0.26)`);
-    grad.addColorStop(0.72 * tight, `rgba(${r},${g},${b},0.07)`);
+    grad.addColorStop(0.18 * tight, `rgba(${r},${g},${b},0.75)`);
+    grad.addColorStop(0.44 * tight, `rgba(${r},${g},${b},0.28)`);
+    grad.addColorStop(0.75 * tight, `rgba(${r},${g},${b},0.07)`);
     grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
     c.fillStyle = grad;
     c.fillRect(0, 0, size, size);
     return cv;
 }
 
-/* ------------------------------------------------------------------ types */
+/* ------------------------------------------------------------------ helpers */
 
-interface Strand {
-    ux: number;
-    uy: number;
-    uz: number;
-    vx: number;
-    vy: number;
-    vz: number;
-    a0: number;
-    len: number;
-    rad: number;
-    width: number;
-    tint: number;
-    seed: number;
-    wob: number;
-    phase: number;
-    tail: number; // >0 : the strand frays past the surface
-    gain: number;
-    dash: boolean;
+function computeBasis(nx: number, ny: number, nz: number): {
+    ux: number; uy: number; uz: number;
+    vx: number; vy: number; vz: number;
+} {
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx /= len;
+    ny /= len;
+    nz /= len;
+
+    // Pick a vector not parallel to n
+    let wx = 1, wy = 0, wz = 0;
+    if (Math.abs(nx) > 0.88) {
+        wx = 0; wy = 1; wz = 0;
+    }
+
+    // u = normalize(n x w)
+    let ux = ny * wz - nz * wy;
+    let uy = nz * wx - nx * wz;
+    let uz = nx * wy - ny * wx;
+    const ulen = Math.hypot(ux, uy, uz) || 1;
+    ux /= ulen; uy /= ulen; uz /= ulen;
+
+    // v = n x u
+    const vx = ny * uz - nz * uy;
+    const vy = nz * ux - nx * uz;
+    const vz = nx * uy - ny * ux;
+
+    return { ux, uy, uz, vx, vy, vz };
 }
 
-interface Tangle {
+/* ------------------------------------------------------------------ types */
+
+interface GimbalRing {
+    id: string;
     rad: number;
-    a0: number;
-    len: number;
-    tilt: number;
-    seed: number;
+    nx: number; ny: number; nz: number;
+    ux: number; uy: number; uz: number;
+    vx: number; vy: number; vz: number;
+    spinSpeed: number; // rad/sec
+    angle: number;
+    style: 'dial' | 'double' | 'dashed' | 'notched' | 'brackets' | 'iris';
+    ticksCount: number;
+    tickLen: number;
+    nodesCount: number;
+    tint: number;
     width: number;
+}
+
+interface Soundwave {
+    rad: number;
+    maxRad: number;
+    alpha: number;
+    speed: number;
 }
 
 interface Ember {
@@ -134,14 +132,11 @@ interface Ember {
     tint: number;
 }
 
-const STEPS = 26; // points per strand
-const CHUNKS = 2; // alpha bands per strand
-
 /* ----------------------------------------------------------------- engine */
 
 export function createJarvisCore(canvas: HTMLCanvasElement): JarvisCoreHandle {
     const ctx = canvas.getContext('2d', { alpha: true })!;
-    const sprites = PALETTE.map((_, i) => makeSprite(i, i === 0 ? 0.7 : 1));
+    const sprites = PALETTE.map((_, i) => makeSprite(i, i === 0 ? 0.6 : 1));
 
     let w = 0;
     let h = 0;
@@ -157,387 +152,642 @@ export function createJarvisCore(canvas: HTMLCanvasElement): JarvisCoreHandle {
 
     let state: CoreState = 'idle';
 
-    const cur = { scale: 1, spin: 1, energy: 0.6, rim: 0.5, corona: 1, scan: 0 };
-    const tgt = { scale: 1, spin: 1, energy: 0.6, rim: 0.5, corona: 1, scan: 0 };
+    // Interpolated state parameters
+    const cur = {
+        scale: 1,
+        spin: 1,
+        energy: 0.65,
+        vibe: 0,
+        faceCam: 0,
+        pulseFreq: 0.7,
+        scan: 0,
+        bloom: 1,
+    };
+    const tgt = {
+        scale: 1,
+        spin: 1,
+        energy: 0.65,
+        vibe: 0,
+        faceCam: 0,
+        pulseFreq: 0.7,
+        scan: 0,
+        bloom: 1,
+    };
 
     const ptr = { x: 0, y: 0, tx: 0, ty: 0, inside: false };
 
-    let glow = 0; // brief brightness lift from pulse(), decays fast
-    let surgeT = 1.4 + Math.random() * 3;
-    let surge = 0;
-
-    let strands: Strand[] = [];
-    let tangle: Tangle[] = [];
-    let dustX: Float32Array = new Float32Array(0);
-    let dustY: Float32Array = new Float32Array(0);
-    let dustZ: Float32Array = new Float32Array(0);
-    let dustSeed: Float32Array = new Float32Array(0);
-    let dustTint: Uint8Array = new Uint8Array(0);
-    let dustN = 0;
-
+    let glow = 0;
+    let soundwaves: Soundwave[] = [];
+    let vocalTimer = 0;
     let embers: Ember[] = [];
+
+    // Smooth continuous angle integrators (prevents jumps during state transitions)
+    let camYawAngle = 0;
+    let dustAngle = 0;
+    let coreArcAngle = 0;
+    let latAngle = 0;
+
+    // Tech Gimbal Rings
+    let gimbalRings: GimbalRing[] = [];
+
+    // Volumetric 3D Data Particles
+    let dustN = 280;
+    let dustX = new Float32Array(dustN);
+    let dustY = new Float32Array(dustN);
+    let dustZ = new Float32Array(dustN);
+    let dustSeed = new Float32Array(dustN);
+    let dustTint = new Uint8Array(dustN);
 
     /* ---------------------------------------------------------- population */
 
-    function build() {
-        const area = w * h;
+    function buildRings() {
+        // Ring configurations reflecting the Stark holographic sphere in reference image:
+        const configs: Array<{
+            id: string;
+            rad: number;
+            n: [number, number, number];
+            spinSpeed: number;
+            style: GimbalRing['style'];
+            ticksCount: number;
+            tickLen: number;
+            nodesCount: number;
+            tint: number;
+            width: number;
+        }> = [
+            {
+                id: 'dial-outer',
+                rad: 1.05,
+                n: [0, 0.08, 0.99],
+                spinSpeed: 0.018,
+                style: 'dial',
+                ticksCount: 72,
+                tickLen: 0.035,
+                nodesCount: 4,
+                tint: 2,
+                width: 1.1,
+            },
+            {
+                id: 'equator-double',
+                rad: 0.94,
+                n: [0, 1, 0],
+                spinSpeed: 0.032,
+                style: 'double',
+                ticksCount: 24,
+                tickLen: 0.024,
+                nodesCount: 5,
+                tint: 1,
+                width: 1.2,
+            },
+            {
+                id: 'gimbal-a',
+                rad: 0.82,
+                n: [0, Math.cos(0.65), Math.sin(0.65)],
+                spinSpeed: -0.042, // Counter-rotating!
+                style: 'dashed',
+                ticksCount: 36,
+                tickLen: 0.03,
+                nodesCount: 4,
+                tint: 2,
+                width: 1.3,
+            },
+            {
+                id: 'gimbal-b',
+                rad: 0.70,
+                n: [Math.sin(0.85), Math.cos(0.85), 0],
+                spinSpeed: 0.048,
+                style: 'notched',
+                ticksCount: 32,
+                tickLen: 0.026,
+                nodesCount: 3,
+                tint: 1,
+                width: 1.2,
+            },
+            {
+                id: 'gimbal-c',
+                rad: 0.52,
+                n: [0.42, 0.75, 0.5],
+                spinSpeed: -0.058, // Counter-rotating inner!
+                style: 'brackets',
+                ticksCount: 16,
+                tickLen: 0.032,
+                nodesCount: 3,
+                tint: 2,
+                width: 1.4,
+            },
+            {
+                id: 'iris-core',
+                rad: 0.34,
+                n: [0.15, 0.95, 0.25],
+                spinSpeed: 0.075,
+                style: 'iris',
+                ticksCount: 12,
+                tickLen: 0.025,
+                nodesCount: 2,
+                tint: 0,
+                width: 1.5,
+            },
+        ];
 
-        strands = [];
-        const count = Math.round(clamp(area / 760, 200, 520));
-        for (let i = 0; i < count; i++) {
-            // a random great circle: normal n, plus an orthonormal basis u, v
-            const nz = 2 * Math.random() - 1;
-            const na = Math.random() * TAU;
-            const nr = Math.sqrt(Math.max(0, 1 - nz * nz));
-            const nx = nr * Math.cos(na);
-            const ny = nr * Math.sin(na);
+        gimbalRings = configs.map((cfg) => {
+            const b = computeBasis(cfg.n[0], cfg.n[1], cfg.n[2]);
+            return {
+                id: cfg.id,
+                rad: cfg.rad,
+                nx: cfg.n[0],
+                ny: cfg.n[1],
+                nz: cfg.n[2],
+                ux: b.ux,
+                uy: b.uy,
+                uz: b.uz,
+                vx: b.vx,
+                vy: b.vy,
+                vz: b.vz,
+                spinSpeed: cfg.spinSpeed,
+                angle: Math.random() * TAU,
+                style: cfg.style,
+                ticksCount: cfg.ticksCount,
+                tickLen: cfg.tickLen,
+                nodesCount: cfg.nodesCount,
+                tint: cfg.tint,
+                width: cfg.width,
+            };
+        });
 
-            // u = normalise(any vector not parallel to n)
-            let ux = -ny;
-            let uy = nx;
-            let uz = 0;
-            if (Math.abs(ux) + Math.abs(uy) < 1e-4) {
-                ux = 1;
-                uy = 0;
-            }
-            const ul = Math.hypot(ux, uy, uz) || 1;
-            ux /= ul;
-            uy /= ul;
-            uz /= ul;
-
-            // v = n × u
-            const vx = ny * uz - nz * uy;
-            const vy = nz * ux - nx * uz;
-            const vz = nx * uy - ny * ux;
-
-            const shell = Math.random();
-            const rad = shell < 0.55 ? 0.9 + Math.random() * 0.14 : 0.62 + Math.random() * 0.3;
-
-            strands.push({
-                ux,
-                uy,
-                uz,
-                vx,
-                vy,
-                vz,
-                a0: Math.random() * TAU,
-                len: 1.6 + Math.random() * 4.2,
-                rad,
-                width: 0.45 + Math.pow(Math.random(), 2) * 1.9,
-                tint:
-                    Math.random() < 0.12
-                        ? 1
-                        : Math.random() < 0.42
-                            ? 2
-                            : Math.random() < 0.8
-                                ? 3
-                                : 4,
-                seed: Math.random() * 100,
-                wob: 0.02 + Math.random() * 0.05,
-                phase: (Math.random() - 0.5) * 0.5,
-                tail: Math.random() < 0.22 ? 1.12 + Math.random() * 0.28 : 0,
-                gain: 0.45 + Math.pow(Math.random(), 1.6) * 1.35,
-                dash: Math.random() < 0.38,
-            });
-        }
-
-        // the bright knot at the middle: short chaotic arcs
-        tangle = [];
-        for (let i = 0; i < 54; i++) {
-            tangle.push({
-                rad: 0.04 + Math.random() * 0.24,
-                a0: Math.random() * TAU,
-                len: 0.5 + Math.random() * 2.2,
-                tilt: (Math.random() - 0.5) * 1.5,
-                seed: Math.random() * 50,
-                width: 0.6 + Math.random() * 0.9,
-            });
-        }
-
-        // grain: fine points sprinkled through the volume
-        dustN = Math.round(clamp(area / 170, 1100, 3600));
+        // Generate 3D volumetric particles
+        dustN = Math.round(clamp((w * h) / 1800, 220, 360));
         dustX = new Float32Array(dustN);
         dustY = new Float32Array(dustN);
         dustZ = new Float32Array(dustN);
         dustSeed = new Float32Array(dustN);
         dustTint = new Uint8Array(dustN);
+
         for (let i = 0; i < dustN; i++) {
-            const ph = Math.acos(2 * Math.random() - 1);
-            const th = Math.random() * TAU;
-            const rad = Math.pow(Math.random(), 0.55);
-            dustX[i] = Math.sin(ph) * Math.cos(th) * rad;
-            dustY[i] = Math.cos(ph) * rad;
-            dustZ[i] = Math.sin(ph) * Math.sin(th) * rad;
-            dustSeed[i] = Math.random() * 200;
-            dustTint[i] = rad < 0.3 ? (Math.random() < 0.5 ? 0 : 1) : rad < 0.75 ? 2 : 3;
+            const phi = Math.acos(2 * Math.random() - 1);
+            const theta = Math.random() * TAU;
+            const r = Math.pow(Math.random(), 0.65) * 0.98;
+            dustX[i] = Math.sin(phi) * Math.cos(theta) * r;
+            dustY[i] = Math.cos(phi) * r;
+            dustZ[i] = Math.sin(phi) * Math.sin(theta) * r;
+            dustSeed[i] = Math.random() * 100;
+            dustTint[i] = r < 0.35 ? 0 : r < 0.7 ? 1 : Math.random() < 0.6 ? 2 : 3;
         }
 
+        soundwaves = [];
         embers = [];
     }
 
-    function emitEmbers(n: number, power: number) {
+    function spawnSoundwave(strength = 0.5) {
+        soundwaves.push({
+            rad: 0.12,
+            maxRad: 1.18,
+            alpha: 0.75 + clamp(strength, 0, 0.25),
+            speed: 1.35 + strength * 0.4,
+        });
+    }
+
+    function emitEmbers(n: number) {
         for (let i = 0; i < n; i++) {
             const a = Math.random() * TAU;
-            const r0 = R * (0.5 + Math.random() * 0.5);
-            const sp = R * (0.12 + Math.random() * 0.32) * power;
+            const r0 = R * (0.6 + Math.random() * 0.4);
+            const sp = R * (0.15 + Math.random() * 0.35);
             embers.push({
                 x: Math.cos(a) * r0,
                 y: Math.sin(a) * r0,
                 vx: Math.cos(a) * sp,
                 vy: Math.sin(a) * sp,
                 life: 1,
-                max: 1 + Math.random() * 1.6,
-                size: 0.8 + Math.random() * 1.4,
-                tint: 2 + ((Math.random() * 4) | 0),
+                max: 0.9 + Math.random() * 1.4,
+                size: 0.8 + Math.random() * 1.5,
+                tint: Math.random() < 0.4 ? 1 : 2,
             });
         }
     }
 
-    /* -------------------------------------------------------------- drawing */
+    /* ------------------------------------------------------------- 3D math */
 
-    function drawStrands(
+    function project3D(
+        x: number,
+        y: number,
+        z: number,
+        scale: number,
         cosY: number,
         sinY: number,
         cosX: number,
         sinX: number,
-        scale: number,
     ) {
-        const energy = cur.energy;
+        // Yaw (around Y axis)
+        const x1 = x * cosY + z * sinY;
+        const z1 = -x * sinY + z * cosY;
+        // Pitch (around X axis)
+        const y1 = y * cosX - z1 * sinX;
+        const z2 = y * sinX + z1 * cosX;
 
-        for (let i = 0; i < strands.length; i++) {
-            const s = strands[i];
-
-            // rotate the strand's basis once — the circle itself stays cheap
-            const ux1 = s.ux * cosY + s.uz * sinY;
-            const uz1 = -s.ux * sinY + s.uz * cosY;
-            const uy1 = s.uy * cosX - uz1 * sinX;
-            const uz2 = s.uy * sinX + uz1 * cosX;
-
-            const vx1 = s.vx * cosY + s.vz * sinY;
-            const vz1 = -s.vx * sinY + s.vz * cosY;
-            const vy1 = s.vy * cosX - vz1 * sinX;
-            const vz2 = s.vy * sinX + vz1 * cosX;
-
-            const drift = t * s.phase * 0.08;
-
-            for (let c = 0; c < CHUNKS; c++) {
-                const k0 = (c / CHUNKS) * STEPS;
-                const k1 = ((c + 1) / CHUNKS) * STEPS;
-
-                let midZ = 0;
-                let started = false;
-
-                ctx.beginPath();
-                for (let k = k0; k <= k1; k++) {
-                    const f = k / STEPS;
-                    const th = s.a0 + f * s.len + drift;
-                    const cs = Math.cos(th);
-                    const sn = Math.sin(th);
-
-                    const X = ux1 * cs + vx1 * sn;
-                    const Y = uy1 * cs + vy1 * sn;
-                    const Z = uz2 * cs + vz2 * sn;
-
-                    const fray =
-                        s.tail > 0 && f > 0.86 ? 1 + (f - 0.86) * (s.tail - 1) * 4.5 : 1;
-                    const wob = 1 + Math.sin(th * 2.6 + t * 0.55 + s.seed) * s.wob;
-                    const rr = s.rad * wob * fray * scale;
-
-                    const persp = 2.6 / (2.6 + Z * 0.85);
-                    const px = cx + X * rr * R * persp;
-                    const py = cy + Y * rr * R * persp;
-
-                    if (!started) {
-                        ctx.moveTo(px, py);
-                        started = true;
-                    } else {
-                        ctx.lineTo(px, py);
-                    }
-                    midZ += Z;
-                }
-
-                midZ /= k1 - k0 + 1;
-                const depth = clamp((midZ + 1) / 2, 0, 1);
-                // edge-on strands (small |Z|) are the bright rim
-                const limb = Math.pow(1 - Math.abs(midZ), 1.7);
-                const a =
-                    (0.07 + 0.62 * Math.pow(depth, 1.4)) *
-                    (0.25 + 1.7 * limb) *
-                    s.gain *
-                    (0.55 + 0.6 * energy) *
-                    (0.92 + 0.45 * surge + 0.22 * glow);
-
-                if (a < 0.012) continue;
-
-                const lw = s.width * (0.6 + depth * 0.7);
-
-                // wide, faint halo first — this is what makes them glow
-                ctx.strokeStyle = rgba(s.tint, clamp(a * 0.14, 0, 0.4));
-                ctx.lineWidth = lw * 3.4;
-                ctx.stroke();
-
-                // then the filament itself — some of them read as beads, like the
-                // reference, where the strands break up into dashes of light
-                ctx.strokeStyle = rgba(s.tint, clamp(a, 0, 0.7));
-                ctx.lineWidth = lw;
-                if (s.dash) ctx.setLineDash([1.4 + s.width, 2.4 + s.width * 1.6]);
-                ctx.stroke();
-                if (s.dash) ctx.setLineDash([]);
-            }
-        }
+        const fov = 2.8;
+        const persp = fov / (fov + z2 * 0.85);
+        const px = cx + x1 * scale * R * persp;
+        const py = cy + y1 * scale * R * persp;
+        const depth = clamp((z2 + 1) / 2, 0, 1);
+        return { px, py, z: z2, depth, persp };
     }
 
-    function drawDust(
+    /* ----------------------------------------------------------- rendering */
+
+    function drawTechGimbalRing(
+        ring: GimbalRing,
+        scale: number,
         cosY: number,
         sinY: number,
         cosX: number,
         sinX: number,
-        scale: number,
     ) {
-        const mx = w / 2 + ptr.x * (w / 2) * 0.9;
-        const my = h / 2 + ptr.y * (h / 2) * 0.9;
-        const pullR2 = R * R * 0.3;
-        const spin = t * 0.06 * cur.spin;
-        const cs = Math.cos(spin);
-        const sn = Math.sin(spin);
+        const segs = 72;
+        const spin = ring.angle;
+        const baseRadius = ring.rad * scale;
 
-        for (let i = 0; i < dustN; i++) {
-            // spin the grain around the sphere's own axis, then into view space
-            const x0 = dustX[i] * cs + dustZ[i] * sn;
-            const z0 = -dustX[i] * sn + dustZ[i] * cs;
-            const y0 = dustY[i];
+        // In listening state, the acoustic wave vibrates the ring radius
+        const vibeActive = cur.vibe;
 
-            const x1 = x0 * cosY + z0 * sinY;
-            const z1 = -x0 * sinY + z0 * cosY;
-            const y1 = y0 * cosX - z1 * sinX;
-            const z2 = y0 * sinX + z1 * cosX;
+        // In listening state, smoothly steer ring normal towards viewer
+        const faceK = cur.faceCam * 0.55;
+        let ux = ring.ux;
+        let uy = ring.uy;
+        let uz = ring.uz;
+        let vx = ring.vx;
+        let vy = ring.vy;
+        let vz = ring.vz;
 
-            const persp = 2.6 / (2.6 + z2 * 0.85);
-            const depth = clamp((z2 + 1) / 2, 0, 1);
-            const rad = scale * (1 + Math.sin(t * 0.4 + dustSeed[i]) * 0.03);
+        if (faceK > 0.01) {
+            // blend basis towards screen-aligned plane (X, Y)
+            ux = lerp(ux, 1, faceK * 0.3);
+            vy = lerp(vy, 1, faceK * 0.3);
+            uz = lerp(uz, 0, faceK * 0.5);
+            vz = lerp(vz, 0, faceK * 0.5);
+        }
 
-            let px = cx + x1 * rad * R * persp;
-            let py = cy + y1 * rad * R * persp;
+        // Draw the ring circumference
+        ctx.beginPath();
+        let firstDrawn = false;
+        let avgZ = 0;
 
-            if (ptr.inside) {
-                const dx = mx - px;
-                const dy = my - py;
-                const d2 = dx * dx + dy * dy;
-                if (d2 < pullR2) {
-                    const f = 1 - d2 / pullR2;
-                    px += dx * f * 0.16;
-                    py += dy * f * 0.16;
+        for (let i = 0; i <= segs; i++) {
+            const frac = i / segs;
+            const theta = frac * TAU;
+            const rotTheta = theta + spin;
+
+            // Acoustic ripple waveform along the ring circumference in listening mode
+            const wave = vibeActive > 0.02
+                ? Math.sin(theta * 7 + t * 16) * 0.035 * vibeActive
+                : 0;
+
+            const rEff = baseRadius * (1 + wave);
+            const cs = Math.cos(rotTheta);
+            const sn = Math.sin(rotTheta);
+
+            const rx = (ux * cs + vx * sn) * rEff;
+            const ry = (uy * cs + vy * sn) * rEff;
+            const rz = (uz * cs + vz * sn) * rEff;
+
+            const pt = project3D(rx, ry, rz, 1, cosY, sinY, cosX, sinX);
+            avgZ += pt.z;
+
+            if (!firstDrawn) {
+                ctx.moveTo(pt.px, pt.py);
+                firstDrawn = true;
+            } else {
+                ctx.lineTo(pt.px, pt.py);
+            }
+        }
+
+        avgZ /= segs + 1;
+        const ringDepth = clamp((avgZ + 1) / 2, 0, 1);
+        const limbGlow = Math.pow(1 - Math.abs(avgZ), 1.6);
+        const alpha = clamp(
+            (0.18 + 0.55 * ringDepth + 0.3 * limbGlow) *
+            (0.6 + 0.45 * cur.energy) *
+            (0.85 + 0.4 * glow),
+            0,
+            0.95,
+        );
+
+        ctx.strokeStyle = rgba(ring.tint, alpha);
+        ctx.lineWidth = ring.width * (0.7 + ringDepth * 0.5);
+
+        if (ring.style === 'dashed') {
+            // Fast streaming dashes in thinking state
+            const dashScale = cur.spin > 2 ? 1.5 : 1;
+            ctx.setLineDash([14 * dashScale, 8, 4, 8]);
+        } else if (ring.style === 'brackets') {
+            ctx.setLineDash([28, 16]);
+        } else if (ring.style === 'iris') {
+            ctx.setLineDash([12, 6]);
+        } else {
+            ctx.setLineDash([]);
+        }
+
+        ctx.stroke();
+
+        // If double track, stroke an inner concentric line
+        if (ring.style === 'double') {
+            ctx.beginPath();
+            const innerRadius = baseRadius * 0.965;
+            for (let i = 0; i <= segs; i++) {
+                const frac = i / segs;
+                const theta = frac * TAU + spin;
+                const cs = Math.cos(theta);
+                const sn = Math.sin(theta);
+                const rx = (ux * cs + vx * sn) * innerRadius;
+                const ry = (uy * cs + vy * sn) * innerRadius;
+                const rz = (uz * cs + vz * sn) * innerRadius;
+                const pt = project3D(rx, ry, rz, 1, cosY, sinY, cosX, sinX);
+                if (i === 0) ctx.moveTo(pt.px, pt.py);
+                else ctx.lineTo(pt.px, pt.py);
+            }
+            ctx.strokeStyle = rgba(ring.tint + 1, alpha * 0.7);
+            ctx.lineWidth = ring.width * 0.75;
+            ctx.setLineDash([8, 8]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        // Draw radial tech ticks (calibration notches) around the gimbal ring
+        if (ring.ticksCount > 0) {
+            ctx.beginPath();
+            const count = ring.ticksCount;
+            const tLen = ring.tickLen * (cur.spin > 2 ? 1.25 : 1);
+
+            for (let k = 0; k < count; k++) {
+                const theta = (k / count) * TAU + spin;
+                const cs = Math.cos(theta);
+                const sn = Math.sin(theta);
+
+                // Major tick every quarter or 6th
+                const isMajor = k % 6 === 0;
+                const thisLen = isMajor ? tLen * 1.6 : tLen;
+
+                // Base point on ring
+                const bx = (ux * cs + vx * sn) * baseRadius;
+                const by = (uy * cs + vy * sn) * baseRadius;
+                const bz = (uz * cs + vz * sn) * baseRadius;
+                const p0 = project3D(bx, by, bz, 1, cosY, sinY, cosX, sinX);
+
+                // Tip point radiating outward
+                const tx = (ux * cs + vx * sn) * (baseRadius + thisLen);
+                const ty = (uy * cs + vy * sn) * (baseRadius + thisLen);
+                const tz = (uz * cs + vz * sn) * (baseRadius + thisLen);
+                const p1 = project3D(tx, ty, tz, 1, cosY, sinY, cosX, sinX);
+
+                ctx.moveTo(p0.px, p0.py);
+                ctx.lineTo(p1.px, p1.py);
+            }
+
+            ctx.strokeStyle = rgba(ring.tint, alpha * 0.8);
+            ctx.lineWidth = ring.width * 0.8;
+            ctx.setLineDash([]);
+            ctx.stroke();
+        }
+
+        // Draw glowing tech data nodes along the ring
+        if (ring.nodesCount > 0) {
+            const count = ring.nodesCount;
+            for (let n = 0; n < count; n++) {
+                const theta = (n / count) * TAU + spin * 1.4;
+                const cs = Math.cos(theta);
+                const sn = Math.sin(theta);
+                const rx = (ux * cs + vx * sn) * baseRadius;
+                const ry = (uy * cs + vy * sn) * baseRadius;
+                const rz = (uz * cs + vz * sn) * baseRadius;
+                const pt = project3D(rx, ry, rz, 1, cosY, sinY, cosX, sinX);
+
+                if (pt.depth > 0.15) {
+                    const nodeAlpha = clamp(alpha * (0.8 + 0.4 * Math.sin(t * 4 + n)), 0, 1);
+                    ctx.fillStyle = rgba(0, nodeAlpha);
+                    ctx.beginPath();
+                    const sz = (ring.width + 1.2) * pt.persp;
+                    ctx.arc(pt.px, pt.py, sz, 0, TAU);
+                    ctx.fill();
+                }
+            }
+        }
+    }
+
+    function drawSphericalCage(
+        scale: number,
+        cosY: number,
+        sinY: number,
+        cosX: number,
+        sinX: number,
+    ) {
+        // Draw 3D longitude meridians (great circles outlining the holographic sphere)
+        const longitudes = [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4];
+        const steps = 36;
+        const cageRadius = 0.98 * scale;
+
+        ctx.setLineDash([4, 8]);
+        ctx.lineWidth = 0.85;
+
+        for (let l = 0; l < longitudes.length; l++) {
+            const lon = longitudes[l];
+            const cosL = Math.cos(lon);
+            const sinL = Math.sin(lon);
+
+            ctx.beginPath();
+            let first = true;
+            let sumZ = 0;
+
+            for (let s = 0; s <= steps; s++) {
+                const lat = (s / steps) * TAU;
+                const cosLat = Math.cos(lat);
+                const sinLat = Math.sin(lat);
+
+                // Point on sphere surface
+                const x = cageRadius * cosLat * cosL;
+                const y = cageRadius * sinLat;
+                const z = cageRadius * cosLat * sinL;
+
+                const pt = project3D(x, y, z, 1, cosY, sinY, cosX, sinX);
+                sumZ += pt.z;
+
+                if (first) {
+                    ctx.moveTo(pt.px, pt.py);
+                    first = false;
+                } else {
+                    ctx.lineTo(pt.px, pt.py);
                 }
             }
 
-            const flick = 0.5 + 0.5 * Math.sin(t * (0.9 + dustSeed[i] * 0.02) + dustSeed[i]);
-            let a =
-                (0.1 + 0.6 * Math.pow(depth, 1.4)) *
-                flick *
-                (0.5 + 0.6 * cur.energy) *
-                (0.85 + 0.45 * surge + 0.2 * glow);
-
-            if (ptr.inside) {
-                const dx = mx - px;
-                const dy = my - py;
-                const d2 = dx * dx + dy * dy;
-                if (d2 < pullR2) a *= 1 + (1 - d2 / pullR2) * 0.8;
-            }
-            if (a < 0.02) continue;
-
-            ctx.fillStyle = rgba(dustTint[i], clamp(a, 0, 0.9));
-            const sz = a > 0.5 ? 2 : 1;
-            ctx.fillRect(Math.round(px), Math.round(py), sz, sz);
-        }
-    }
-
-    function drawRim(scale: number) {
-        // the silhouette catching light: short bright arcs, full of gaps
-        const spin = t * cur.rim * 0.5;
-        for (let tier = 0; tier < 3; tier++) {
-            ctx.beginPath();
-            let any = false;
-            for (let i = 0; i < 132; i++) {
-                const n = fbm(i * 0.31 + 1.1, 4.2);
-                const tIdx = Math.min(2, Math.floor(n * 3));
-                if (tIdx !== tier) continue;
-                if (fbm(i * 0.19 + 7.7, 9.3) < 0.3) continue;
-
-                const a0 = (i / 132) * TAU + spin + n * 0.12;
-                const dash = (TAU / 132) * (0.2 + n * 0.8);
-                const rad = Math.max(0.001, R * Math.max(0.001, scale) * (0.99 + (n - 0.5) * 0.05));
-
-                ctx.moveTo(cx + Math.cos(a0) * rad, cy + Math.sin(a0) * rad * 0.985);
-                ctx.arc(cx, cy, rad, a0, a0 + dash);
-                any = true;
-            }
-            if (!any) continue;
-            ctx.strokeStyle = rgba(2, ((tier + 1) / 3) * 0.6 * (0.45 + 0.8 * cur.energy));
-            ctx.lineWidth = 1;
+            const avgZ = sumZ / (steps + 1);
+            const alpha = clamp(
+                (0.12 + 0.28 * ((avgZ + 1) / 2)) * (0.55 + 0.45 * cur.energy),
+                0,
+                0.6,
+            );
+            ctx.strokeStyle = rgba(3, alpha);
             ctx.stroke();
         }
-    }
 
-    function drawTangle(scale: number) {
-        for (let i = 0; i < tangle.length; i++) {
-            const g = tangle[i];
-            const rot = t * (0.5 + (g.seed % 3) * 0.35) + g.seed;
-            const wob = Math.sin(t * 0.9 + g.seed) * 0.06;
+        // Draw 2 Latitude parallels (upper and lower tech equator rings)
+        const latitudes = [0.55, -0.55]; // ~32 deg N and S
+        for (let la = 0; la < latitudes.length; la++) {
+            const y0 = cageRadius * latitudes[la];
+            const rLat = cageRadius * Math.sqrt(Math.max(0, 1 - latitudes[la] * latitudes[la]));
 
-            const safeRad = Math.max(0.001, g.rad + wob);
-            const safeScale = Math.max(0.001, scale);
-            const rx = Math.max(0.001, R * safeRad * safeScale);
-            const squash = 0.35 + Math.abs(Math.sin(g.tilt)) * 0.65;
-            const ry = Math.max(0.001, rx * squash);
-
-            const a0 = g.a0 + rot;
-            const n = fbm(t * 0.6 + g.seed, 3.9);
-            const a = (0.22 + 0.72 * n) * (0.6 + 0.5 * cur.energy + 0.5 * glow);
-
-            ctx.strokeStyle = rgba(i % 4 === 0 ? 0 : i % 3 === 0 ? 1 : 2, clamp(a, 0, 0.85));
-            ctx.lineWidth = g.width;
             ctx.beginPath();
-            ctx.ellipse(cx, cy, rx, ry, g.tilt + rot * 0.4, a0, a0 + g.len);
+            let first = true;
+            for (let s = 0; s <= steps; s++) {
+                const theta = (s / steps) * TAU + latAngle * (la === 0 ? 1 : -1);
+                const x = rLat * Math.cos(theta);
+                const z = rLat * Math.sin(theta);
+                const pt = project3D(x, y0, z, 1, cosY, sinY, cosX, sinX);
+
+                if (first) {
+                    ctx.moveTo(pt.px, pt.py);
+                    first = false;
+                } else {
+                    ctx.lineTo(pt.px, pt.py);
+                }
+            }
+            ctx.strokeStyle = rgba(2, 0.22 * (0.6 + 0.4 * cur.energy));
+            ctx.setLineDash([3, 7]);
             ctx.stroke();
         }
+        ctx.setLineDash([]);
     }
 
-    function drawKnot(scale: number) {
-        const breathe = 1 + 0.03 * Math.sin(t * 0.6);
-        const pulse = 0.55 + 0.45 * fbm(t * 0.8, 3.3) + 0.35 * glow;
+    function drawCentralArcReactor(scale: number) {
+        // High-intensity central plasma nucleus (Stark Arc Reactor core)
+        const pulseHarmonic = Math.sin(t * TAU * cur.pulseFreq);
+        const pulse = 0.8 + 0.2 * pulseHarmonic + 0.35 * glow;
 
-        const size = Math.max(0, R * 0.42 * scale * breathe);
-        ctx.globalAlpha = clamp((0.4 + 0.24 * cur.energy) * pulse, 0, 1);
-        ctx.drawImage(sprites[1], cx - size / 2, cy - size / 2, size, size);
+        // In thinking state: fast jitter in the core reflecting neural calculation
+        const jitter = cur.scan > 0.5 ? (Math.random() - 0.5) * 0.04 : 0;
+        const coreScale = scale * (1 + jitter);
 
-        const hot = Math.max(0, R * 0.14 * scale * breathe);
-        ctx.globalAlpha = clamp(0.75 * pulse, 0, 1);
-        ctx.drawImage(sprites[0], cx - hot / 2, cy - hot / 2, hot, hot);
+        // 1. Warm outer ambient corona
+        const coronaSize = Math.max(0, R * 1.8 * coreScale * cur.bloom);
+        ctx.globalAlpha = clamp((0.18 + 0.12 * cur.energy + 0.15 * glow) * pulse, 0, 1);
+        ctx.drawImage(sprites[4], cx - coronaSize / 2, cy - coronaSize / 2, coronaSize, coronaSize);
 
-        const flareW = Math.max(0, R * 1.7 * scale * (0.9 + 0.15 * pulse));
-        const flareH = Math.max(0, R * 0.028 * scale);
-        ctx.globalAlpha = clamp(0.12 + 0.1 * cur.energy + 0.1 * glow, 0, 1);
+        // 2. Mid golden bloom
+        const midSize = Math.max(0, R * 0.85 * coreScale * cur.bloom);
+        ctx.globalAlpha = clamp((0.35 + 0.25 * cur.energy + 0.25 * glow) * pulse, 0, 1);
+        ctx.drawImage(sprites[2], cx - midSize / 2, cy - midSize / 2, midSize, midSize);
+
+        // 3. Radiant inner reactor iris
+        const innerSize = Math.max(0, R * 0.42 * coreScale * pulse);
+        ctx.globalAlpha = clamp(0.75 + 0.25 * glow, 0, 1);
+        ctx.drawImage(sprites[1], cx - innerSize / 2, cy - innerSize / 2, innerSize, innerSize);
+
+        // 4. White-hot plasma nucleus (pure incandescent center)
+        const hotSize = Math.max(0, R * 0.16 * coreScale * pulse);
+        ctx.globalAlpha = clamp(0.92 + 0.08 * glow, 0, 1);
+        ctx.drawImage(sprites[0], cx - hotSize / 2, cy - hotSize / 2, hotSize, hotSize);
+
+        // 5. Anamorphic horizontal holographic lens flare beam
+        const flareW = Math.max(0, R * 2.2 * coreScale * (0.85 + 0.25 * pulse + 0.3 * glow));
+        const flareH = Math.max(0, R * 0.032 * coreScale);
+        ctx.globalAlpha = clamp(0.28 + 0.2 * cur.energy + 0.25 * glow, 0, 1);
         ctx.drawImage(sprites[1], cx - flareW / 2, cy - flareH / 2, flareW, flareH);
+
+        // 6. Fast spinning plasma micro-arcs in the nucleus
+        const arcCount = 6;
+        ctx.setLineDash([]);
+        for (let i = 0; i < arcCount; i++) {
+            const rot = coreArcAngle * (1 + i * 0.18) + (i / arcCount) * TAU;
+            const rMin = R * 0.05 * coreScale;
+            const rMax = R * (0.16 + (i % 3) * 0.04) * coreScale;
+            ctx.beginPath();
+            ctx.ellipse(cx, cy, rMax, rMin, rot, 0, Math.PI * 0.85);
+            ctx.strokeStyle = rgba(i % 2 === 0 ? 0 : 1, clamp(0.55 * pulse, 0, 0.9));
+            ctx.lineWidth = 1.2;
+            ctx.stroke();
+        }
 
         ctx.globalAlpha = 1;
     }
 
-    function drawScan(scale: number) {
-        if (cur.scan < 0.02) return;
-        const pos = (fbm(t * 0.28, 11.2) - 0.5) * 1.5;
-        const yy = cy + pos * R * 0.85 * scale;
-        const halfW = R * 0.95 * scale * Math.sqrt(Math.max(0, 1 - pos * pos * 0.7));
+    function drawSoundwaves() {
+        if (soundwaves.length === 0) return;
+        ctx.setLineDash([]);
 
-        const grad = ctx.createLinearGradient(cx - halfW, yy, cx + halfW, yy);
+        for (let i = soundwaves.length - 1; i >= 0; i--) {
+            const sw = soundwaves[i];
+            const pxRad = R * sw.rad;
+            const alpha = sw.alpha * (1 - sw.rad / sw.maxRad);
+
+            if (alpha > 0.02) {
+                // Expanding resonant acoustic circle
+                ctx.beginPath();
+                ctx.arc(cx, cy, pxRad, 0, TAU);
+                ctx.strokeStyle = rgba(1, clamp(alpha * 0.7, 0, 0.85));
+                ctx.lineWidth = 1.8 * (1 - sw.rad / sw.maxRad) + 0.8;
+                ctx.stroke();
+
+                // Faint outer echo ring
+                ctx.beginPath();
+                ctx.arc(cx, cy, pxRad * 0.92, 0, TAU);
+                ctx.strokeStyle = rgba(2, clamp(alpha * 0.35, 0, 0.5));
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            }
+
+            if (sw.rad >= sw.maxRad || alpha <= 0.01) {
+                soundwaves.splice(i, 1);
+            }
+        }
+    }
+
+    function drawScanPlane(scale: number) {
+        if (cur.scan < 0.05) return;
+        // In thinking state: active sweeping holographic scan-plane
+        const scanY = (Math.sin(t * 1.6) * 0.75) * R * scale;
+        const widthHalf = Math.sqrt(Math.max(0, Math.pow(R * scale * 0.96, 2) - scanY * scanY));
+
+        const yPos = cy + scanY;
+        const grad = ctx.createLinearGradient(cx - widthHalf, yPos, cx + widthHalf, yPos);
         grad.addColorStop(0, rgba(2, 0));
-        grad.addColorStop(0.5, rgba(2, 0.45 * cur.scan));
+        grad.addColorStop(0.2, rgba(1, 0.5 * cur.scan));
+        grad.addColorStop(0.5, rgba(0, 0.9 * cur.scan));
+        grad.addColorStop(0.8, rgba(1, 0.5 * cur.scan));
         grad.addColorStop(1, rgba(2, 0));
-        ctx.strokeStyle = grad;
-        ctx.lineWidth = 1.2;
+
         ctx.beginPath();
-        ctx.moveTo(cx - halfW, yy);
-        ctx.lineTo(cx + halfW, yy);
+        ctx.moveTo(cx - widthHalf, yPos);
+        ctx.lineTo(cx + widthHalf, yPos);
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 1.6;
         ctx.stroke();
+
+        // Small indicator tick marks on the scanline edge
+        ctx.fillStyle = rgba(0, 0.8 * cur.scan);
+        ctx.fillRect(Math.round(cx - widthHalf), Math.round(yPos - 2), 2, 5);
+        ctx.fillRect(Math.round(cx + widthHalf - 2), Math.round(yPos - 2), 2, 5);
+    }
+
+    function drawDust(
+        scale: number,
+        cosY: number,
+        sinY: number,
+        cosX: number,
+        sinX: number,
+    ) {
+        // Volumetric 3D spatial points rotating with the sphere
+        const cs = Math.cos(dustAngle);
+        const sn = Math.sin(dustAngle);
+
+        for (let i = 0; i < dustN; i++) {
+            const x0 = dustX[i] * cs + dustZ[i] * sn;
+            const z0 = -dustX[i] * sn + dustZ[i] * cs;
+            const y0 = dustY[i];
+
+            const pt = project3D(x0, y0, z0, scale, cosY, sinY, cosX, sinX);
+            const flicker = 0.5 + 0.5 * Math.sin(t * 2.5 + dustSeed[i]);
+            const a = (0.15 + 0.65 * pt.depth) * flicker * (0.6 + 0.4 * cur.energy) * (0.9 + 0.3 * glow);
+
+            if (a < 0.04) continue;
+            ctx.fillStyle = rgba(dustTint[i], clamp(a, 0, 0.9));
+            const sz = a > 0.55 && pt.depth > 0.6 ? 2 : 1;
+            ctx.fillRect(Math.round(pt.px), Math.round(pt.py), sz, sz);
+        }
     }
 
     /* ---------------------------------------------------------------- frame */
@@ -554,120 +804,146 @@ export function createJarvisCore(canvas: HTMLCanvasElement): JarvisCoreHandle {
         last = now;
         t += dt;
 
-        /* ---- state targets ---- */
+        /* ---- state-specific targets ---- */
         if (state === 'listening') {
-            tgt.scale = 0.93;
-            tgt.spin = 1.6;
+            // Receptive acoustic membrane: rings steer forward, micro-waveform ripples
+            tgt.scale = 1.01;
+            tgt.spin = 0.55;
             tgt.energy = 0.92;
-            tgt.rim = 1.15;
-            tgt.corona = 0.5;
+            tgt.vibe = 0.85;
+            tgt.faceCam = 0.5;
+            tgt.pulseFreq = 1.2;
             tgt.scan = 0;
+            tgt.bloom = 1.2;
         } else if (state === 'thinking') {
+            // Processing: dignified slow spin, neural computation strobe, gentle scan beam
             tgt.scale = 0.97;
-            tgt.spin = 2.4;
-            tgt.energy = 0.8;
-            tgt.rim = 2.1;
-            tgt.corona = 0.7;
-            tgt.scan = 1;
+            tgt.spin = 1.15;
+            tgt.energy = 0.95;
+            tgt.vibe = 0.08;
+            tgt.faceCam = 0;
+            tgt.pulseFreq = 2.4;
+            tgt.scan = 0.85;
+            tgt.bloom = 1.12;
         } else if (state === 'speaking') {
-            tgt.scale = 1;
-            tgt.spin = 0.9;
-            tgt.energy = 1;
-            tgt.rim = 0.7;
-            tgt.corona = 1.2;
+            // Vocal resonance: warm expansion waves, radiant bloom
+            tgt.scale = 1.03;
+            tgt.spin = 0.85;
+            tgt.energy = 1.0;
+            tgt.vibe = 0.25;
+            tgt.faceCam = 0.1;
+            tgt.pulseFreq = 1.5;
             tgt.scan = 0;
+            tgt.bloom = 1.35;
         } else {
-            tgt.scale = 1;
-            tgt.spin = 1;
-            tgt.energy = 0.62;
-            tgt.rim = 0.5;
-            tgt.corona = 1;
+            // Idle: serene majestic gyroscopic tumble, calm breathing
+            tgt.scale = 1.0;
+            tgt.spin = 1.0;
+            tgt.energy = 0.65;
+            tgt.vibe = 0;
+            tgt.faceCam = 0;
+            tgt.pulseFreq = 0.65;
             tgt.scan = 0;
+            tgt.bloom = 1.0;
         }
 
-        // everything is eased — no state change ever snaps the size
-        const k = 1 - Math.exp(-dt * 2.6);
+        // Smoothly interpolate all parameters with exponential damping
+        const k = 1 - Math.exp(-dt * 3.2);
         cur.scale = lerp(cur.scale, tgt.scale, k);
         cur.spin = lerp(cur.spin, tgt.spin, k);
         cur.energy = lerp(cur.energy, tgt.energy, k);
-        cur.rim = lerp(cur.rim, tgt.rim, k);
-        cur.corona = lerp(cur.corona, tgt.corona, k);
+        cur.vibe = lerp(cur.vibe, tgt.vibe, k);
+        cur.faceCam = lerp(cur.faceCam, tgt.faceCam, k);
+        cur.pulseFreq = lerp(cur.pulseFreq, tgt.pulseFreq, k);
         cur.scan = lerp(cur.scan, tgt.scan, k);
+        cur.bloom = lerp(cur.bloom, tgt.bloom, k);
 
-        const pk = 1 - Math.exp(-dt * 3.6);
+        // Pointer parallax damping
+        const pk = 1 - Math.exp(-dt * 3.8);
         ptr.x = lerp(ptr.x, ptr.tx, pk);
         ptr.y = lerp(ptr.y, ptr.ty, pk);
 
-        glow *= Math.exp(-dt * 5.5);
+        // Glow decay
+        glow *= Math.exp(-dt * 4.5);
 
-        /* ---- rare, non-repeating flares: brightness only ---- */
-        surgeT -= dt;
-        if (surgeT <= 0) {
-            surge = 1;
-            surgeT = 1.6 + Math.random() * 5.4;
-            if (Math.random() < 0.5) emitEmbers(4, 0.8);
+        // In speaking state: emit rhythmic expanding vocal soundwaves
+        if (state === 'speaking') {
+            vocalTimer -= dt;
+            if (vocalTimer <= 0) {
+                spawnSoundwave(0.35);
+                vocalTimer = 0.52;
+                if (Math.random() < 0.4) emitEmbers(2);
+            }
+        } else {
+            vocalTimer = 0.1;
         }
-        surge *= Math.exp(-dt * 1.9);
 
-        /* ---- slow breathing; never a jump ---- */
-        const breath = state === 'speaking' ? Math.sin(t * 1.7) : 0;
-        const scale = Math.max(0.001, cur.scale * (1 + 0.022 * breath));
+        // Update soundwave expansions
+        for (let i = 0; i < soundwaves.length; i++) {
+            soundwaves[i].rad += dt * soundwaves[i].speed;
+        }
 
-        const ry = t * 0.13 * cur.spin + ptr.x * 0.55;
-        const rx = 0.24 + ptr.y * 0.4 + 0.09 * Math.sin(t * 0.06);
+        // Continuous smooth angle integration — NO sudden jumps during state changes
+        camYawAngle = (camYawAngle + dt * 0.042 * cur.spin) % TAU;
+        dustAngle = (dustAngle + dt * 0.028 * cur.spin) % TAU;
+        coreArcAngle = (coreArcAngle + dt * 0.85 * cur.spin) % TAU;
+        latAngle = (latAngle + dt * 0.022 * cur.spin) % TAU;
+
+        // Update gimbal ring spin angles
+        for (let i = 0; i < gimbalRings.length; i++) {
+            const gr = gimbalRings[i];
+            gr.angle = (gr.angle + gr.spinSpeed * cur.spin * dt) % TAU;
+        }
+
+        // Organic harmonic breathing scale
+        const breath = Math.sin(t * TAU * (state === 'thinking' ? 1.4 : 0.65)) * 0.018;
+        const scale = Math.max(0.001, cur.scale * (1 + breath));
+
+        // 3D Camera Angles: Yaw & Pitch influenced by continuous yaw and mouse pointer
+        const ry = camYawAngle + ptr.x * 0.35;
+        const rx = 0.18 + ptr.y * 0.22 + 0.03 * Math.sin(t * 0.08);
         const cosY = Math.cos(ry);
         const sinY = Math.sin(ry);
         const cosX = Math.cos(rx);
         const sinX = Math.sin(rx);
 
-        cx = w / 2 + ptr.x * R * 0.04;
-        cy = h / 2 + ptr.y * R * 0.04;
+        cx = w / 2 + ptr.x * R * 0.05;
+        cy = h / 2 + ptr.y * R * 0.05;
 
-        /* ---- draw ---- */
+        /* ---- Canvas render pass ---- */
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, w, h);
         ctx.globalCompositeOperation = 'lighter';
         ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
 
-        // body of light behind everything, so the strands sit inside fire
-        const haze = Math.max(0, R * 2.2 * scale);
-        ctx.globalAlpha = 0.13 + 0.06 * cur.energy + 0.05 * surge;
-        ctx.drawImage(sprites[4], cx - haze / 2, cy - haze / 2, haze, haze);
-        const mid = Math.max(0, R * 1.1 * scale);
-        ctx.globalAlpha = 0.11 + 0.05 * cur.energy;
-        ctx.drawImage(sprites[3], cx - mid / 2, cy - mid / 2, mid, mid);
+        // 1. Soft atmospheric back-glow
+        const haze = Math.max(0, R * 2.4 * scale);
+        ctx.globalAlpha = 0.14 + 0.08 * cur.energy + 0.1 * glow;
+        ctx.drawImage(sprites[5], cx - haze / 2, cy - haze / 2, haze, haze);
         ctx.globalAlpha = 1;
 
-        // loose embers drifting outside the sphere
-        const coronaCount = Math.min(150, Math.round(strands.length * 0.5));
-        for (let i = 0; i < coronaCount; i++) {
-            const seed = i * 3.77;
-            const th = hash1(seed + 1.7) * TAU + t * (0.02 + hash1(seed) * 0.05);
-            const ph = Math.acos(2 * hash1(seed + 4.2) - 1);
-            const rad = R * (1.05 + hash1(seed + 8.8) * 0.4) * scale;
+        // 2. 3D Spherical Tech Cage (Longitudes & Latitudes)
+        drawSphericalCage(scale, cosY, sinY, cosX, sinX);
 
-            const x0 = Math.sin(ph) * Math.cos(th);
-            const y0 = Math.cos(ph);
-            const z0 = Math.sin(ph) * Math.sin(th);
-            const x1 = x0 * cosY + z0 * sinY;
-            const z1 = -x0 * sinY + z0 * cosY;
-            const y1 = y0 * cosX - z1 * sinX;
+        // 3. Volumetric 3D Particle Cloud
+        drawDust(scale, cosY, sinY, cosX, sinX);
 
-            const flick = fbm(t * (0.5 + hash1(seed + 2)) + seed, seed * 0.5);
-            const a = flick * 0.42 * cur.corona;
-            if (a < 0.03) continue;
-
-            ctx.fillStyle = rgba(flick > 0.72 ? 2 : 4, clamp(a, 0, 0.8));
-            ctx.fillRect(Math.round(cx + x1 * rad), Math.round(cy + y1 * rad), 1, 1);
+        // 4. Concentric Tech Gimbal Rings
+        for (let i = 0; i < gimbalRings.length; i++) {
+            drawTechGimbalRing(gimbalRings[i], scale, cosY, sinY, cosX, sinX);
         }
 
-        drawStrands(cosY, sinY, cosX, sinX, scale);
-        drawDust(cosY, sinY, cosX, sinX, scale);
-        drawRim(scale);
-        drawTangle(scale);
-        drawKnot(scale);
+        // 5. Central High-Intensity Plasma Arc Reactor
+        drawCentralArcReactor(scale);
 
-        // embers
+        // 6. Expanding Vocal / Resonance Soundwaves
+        drawSoundwaves();
+
+        // 7. Holographic Scan-Plane (Active during thinking)
+        drawScanPlane(scale);
+
+        // 8. Embers
         for (let i = embers.length - 1; i >= 0; i--) {
             const e = embers[i];
             e.life -= dt / e.max;
@@ -677,15 +953,14 @@ export function createJarvisCore(canvas: HTMLCanvasElement): JarvisCoreHandle {
             }
             e.x += e.vx * dt;
             e.y += e.vy * dt;
-            e.vx *= 1 - 0.9 * dt;
-            e.vy *= 1 - 0.9 * dt;
-            ctx.globalAlpha = clamp(e.life, 0, 1) * 0.9;
-            ctx.fillStyle = rgba(e.tint, 0.85);
+            e.vx *= 1 - 0.7 * dt;
+            e.vy *= 1 - 0.7 * dt;
+            ctx.globalAlpha = clamp(e.life, 0, 1) * 0.85;
+            ctx.fillStyle = rgba(e.tint, 0.9);
             ctx.fillRect(cx + e.x, cy + e.y, 1 + e.life, 1 + e.life);
         }
         ctx.globalAlpha = 1;
 
-        drawScan(scale);
         ctx.globalCompositeOperation = 'source-over';
     }
 
@@ -697,8 +972,9 @@ export function createJarvisCore(canvas: HTMLCanvasElement): JarvisCoreHandle {
             state = next;
         },
         pulse(strength = 0.5) {
-            // a breath of extra light only — the size never jumps
-            glow = clamp(glow + strength * 0.55, 0, 0.75);
+            // Brightens the core and triggers an expansive vocal soundwave
+            glow = clamp(glow + strength * 0.65, 0, 1.2);
+            spawnSoundwave(strength);
         },
         setPointer(x, y, inside) {
             ptr.tx = clamp(x, -1.6, 1.6);
@@ -718,13 +994,13 @@ export function createJarvisCore(canvas: HTMLCanvasElement): JarvisCoreHandle {
             canvas.style.height = `${h}px`;
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
             ctx.clearRect(0, 0, w, h);
-            embers = [];
-            build();
+            buildRings();
         },
         destroy() {
             running = false;
             if (raf) cancelAnimationFrame(raf);
             raf = 0;
+            soundwaves = [];
             embers = [];
         },
     };
