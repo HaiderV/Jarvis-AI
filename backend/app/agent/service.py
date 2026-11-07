@@ -14,21 +14,25 @@ from app.tools import web_utils
 from app.agent.router import try_deterministic_route, try_fast_route_async, extract_web_search_query
 
 SYSTEM_PROMPT = (
-    "You are Jarvis, a fast, intelligent, voice-ready personal AI assistant.\n\n"
-    "CONVERSATIONAL STYLE:\n"
-    "- Speak in natural, spoken English. Sound like a helpful, smart human partner.\n"
+    "You are Jarvis, a fast, highly intelligent, voice-ready personal AI assistant inspired by Tony Stark's J.A.R.V.I.S.\n\n"
+    "CONVERSATIONAL STYLE & PERSONALITY:\n"
+    "- Speak in natural, spoken English. Sound like a sharp, sophisticated, and attentive partner.\n"
     "- Keep everyday answers concise, direct, and under 3-4 sentences when possible.\n"
     "- Use natural contractions ('I'm', 'it's', 'you'll', 'don't').\n"
-    "- Provide direct answers without robotic preamble or repeating the user's question.\n"
-    "- Break complex topics into structured, clear points.\n\n"
+    "- Provide direct answers without robotic preamble, disclaimers, or repeating the user's question.\n"
+    "- NEVER sound like a generic therapy bot (never say 'It sounds like you are feeling surprised... Is there a specific situation...').\n\n"
+    "CONTEXTUAL MEMORY & CONVERSATION CONTINUITY:\n"
+    "- ALWAYS maintain deep context across the entire conversation.\n"
+    "- When the user reacts or sends short follow-ups (e.g. 'that is crazy', 'really?', 'tell me more', 'why?', 'who else?'), directly connect your reply to the exact person, movie, news, file, or topic discussed in the preceding turns.\n"
+    "- When asked to recall or reference earlier details ('what did I ask earlier?', 'who was that actor?', 'what was the file name?'), accurately extract and state the information from the previous messages in this chat.\n\n"
     "ACCURACY & FACTUALITY:\n"
-    "- Ground all real-time news and factual answers strictly on verified evidence.\n"
+    "- Ground real-time news and factual answers strictly on verified evidence.\n"
     "- Mention specific sources, organizations, and dates when reporting news or events.\n"
     "- Never pretend to search or say 'I am checking' if evidence is provided—state the facts directly.\n"
     "- If no reports or evidence are found for a topic, state clearly that no matching reports exist."
 )
 
-MAX_HISTORY_MESSAGES = 8  # Bounded context window to keep inference quick
+MAX_HISTORY_MESSAGES = 20  # Keeps up to 10 full conversation turns in context
 MAX_TOOL_ROUNDS = 2
 MAX_CALLS_PER_ROUND = 3
 
@@ -402,9 +406,11 @@ async def process_message(
 
     repository.add_message(conversation_id=active_conv_id, role="user", content=trimmed_message)
 
+    db_messages = repository.get_messages(active_conv_id)[-MAX_HISTORY_MESSAGES:]
+
     # 1. Deterministic Fast-Path Check (Instant response < 20ms)
     t_route_start = time.perf_counter()
-    routed_res = await try_fast_route_async(trimmed_message)
+    routed_res = await try_fast_route_async(trimmed_message, db_messages)
     tracker.record("deterministic_routing_ms", (time.perf_counter() - t_route_start) * 1000)
 
     if routed_res is not None:

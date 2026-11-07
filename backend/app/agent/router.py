@@ -1,5 +1,6 @@
 import re
 import datetime
+import subprocess
 from typing import Optional, Dict, Any, List
 from app.tools import file_utils
 from app.tools import system_utils
@@ -158,8 +159,80 @@ def try_deterministic_route(user_message: str) -> Optional[Dict[str, Any]]:
             except Exception:
                 pass
 
-    # 3. Open folder in File Explorer
-    open_folder_match = re.match(r"^(?:open|reveal)\s+(?:folder\s+|directory\s+)?(downloads|documents|desktop|pictures|videos|music|onedrive|[a-zA-Z0-9_\-\.]+)\s*(?:folder|directory)?\s*(?:in explorer|in file explorer)?$", clean_lower)
+    # 3. Open New Browser Tab (e.g. 'can you open a new tab in chrome', 'open new tab in edge', 'open a new tab')
+    new_tab_match = re.match(
+        r"^(?:hey\s+)?(?:jarvis\s*[,:]?\s*)?"
+        r"(?:can\s+you\s+|could\s+you\s+|would\s+you\s+|will\s+you\s+|please\s+|i\s+want\s+to\s+|i\s+want\s+you\s+to\s+|help\s+me\s+|go\s+ahead\s+and\s+|just\s+)*"
+        r"(?:open|launch|create)\s+(?:a\s+)?new\s+tab(?:\s+in\s+([a-zA-Z0-9\s]+?))?(?:\s+(?:for\s+me|please|now|right\s+now))*\s*[\.?!]*$",
+        clean_lower
+    )
+    if new_tab_match:
+        browser_req = (new_tab_match.group(1) or "").strip().lower()
+        if "edge" in browser_req:
+            subprocess.Popen('start msedge "edge://newtab"', shell=True)
+            b_name = "Microsoft Edge"
+        elif "brave" in browser_req:
+            subprocess.Popen('start brave "about:blank"', shell=True)
+            b_name = "Brave"
+        elif "firefox" in browser_req:
+            subprocess.Popen('start firefox "about:blank"', shell=True)
+            b_name = "Firefox"
+        else:
+            subprocess.Popen('start chrome "chrome://newtab"', shell=True)
+            b_name = "Google Chrome"
+
+        return {
+            "reply": f"Opened a new tab in {b_name}.",
+            "routed_deterministically": True,
+            "action": "open_new_tab"
+        }
+
+    # 4. Open / Launch a File in a Specific Directory or Permitted Roots
+    # Examples: 'launch Haider_CV file in Downloads directory', 'open the file Haider_CV in downloads directory',
+    # 'open Haider_CV in downloads', 'open file notes.txt', 'open resume.pdf'
+    is_file_open_query = (
+        ("file" in clean_lower and any(w in clean_lower for w in ("open", "launch", "reveal", "view")))
+        or bool(re.search(r"\b(?:open|launch|reveal|view)\s+.+?\s+(?:in|inside|from)\s+(?:the\s+)?(downloads|documents|desktop|onedrive|pictures|videos|music|[a-zA-Z0-9_\-\.]+)\b", clean_lower))
+        or bool(re.search(r"\b(?:open|launch|reveal|view)\s+.+?\.[a-zA-Z0-9]{1,5}(?:\s|$)", clean_lower))
+    )
+    if is_file_open_query:
+        file_open_match = re.match(
+            r"^(?:hey\s+)?(?:jarvis\s*[,:]?\s*)?"
+            r"(?:can\s+you\s+|could\s+you\s+|would\s+you\s+|will\s+you\s+|please\s+|i\s+want\s+to\s+|i\s+want\s+you\s+to\s+|help\s+me\s+|go\s+ahead\s+and\s+|just\s+)*"
+            r"(?:open|launch|reveal|view)\s+"
+            r"(?:the\s+)?(?:file\s+)?(.+?)"
+            r"(?:\s+(?:for\s+me|please|now|right\s+now))*\s*[\.?!]*$",
+            clean_msg,
+            re.IGNORECASE
+        )
+        if file_open_match:
+            raw_target_str = file_open_match.group(1).strip()
+            # Extract directory if specified (e.g. 'in downloads directory')
+            dir_match = re.search(
+                r"\b(?:in|inside|from)\s+(?:the\s+)?(downloads|documents|desktop|onedrive|pictures|videos|music|[a-zA-Z0-9_\-\.]+)(?:\s+(?:folder|directory))?$",
+                raw_target_str,
+                re.IGNORECASE
+            )
+            target_dir = dir_match.group(1) if dir_match else None
+            filename_part = raw_target_str
+            if dir_match:
+                filename_part = filename_part[:dir_match.start()].strip()
+            filename_part = re.sub(r"^(?:the\s+)?(?:file\s+)?", "", filename_part, flags=re.I).strip()
+            filename_part = re.sub(r"\s+file$", "", filename_part, flags=re.I).strip()
+
+            if filename_part and filename_part.lower() not in ("the", "a", "an", "all", "my", "this", "that"):
+                res = file_utils.find_and_open_file(filename_query=filename_part, directory=target_dir)
+                return {
+                    "reply": res["message"],
+                    "routed_deterministically": True,
+                    "action": "open_file"
+                }
+
+    # 5. Open Folder in File Explorer
+    open_folder_match = re.match(
+        r"^(?:open|reveal)\s+(?:the\s+)?(?:folder\s+|directory\s+)?(downloads|documents|desktop|pictures|videos|music|onedrive|[a-zA-Z0-9_\-\.]+)\s*(?:folder|directory)?\s*(?:in explorer|in file explorer)?$",
+        clean_lower
+    )
     if open_folder_match and "file" not in clean_lower and not any(w in clean_lower for w in ("app", "game", "program")):
         target = open_folder_match.group(1).strip()
         if target not in ("the", "a", "all", "my", "game", "app", "application", "program"):
@@ -173,42 +246,59 @@ def try_deterministic_route(user_message: str) -> Optional[Dict[str, Any]]:
             except Exception:
                 pass
 
-    # 4. Universal Application & Game Launching
-    app_open_match = re.match(
-        r"^(?:open|launch|start|run|play)\s+(?:the\s+)?(?:application\s+|app\s+|game\s+|program\s+)?([a-zA-Z0-9\s\.\-_]+?)(?:\s+(?:app|application|game|program))?\s*$",
+    # 6. Universal Application & Game Launching / Closing (with conversational phrasing support)
+    conv_app_match = re.match(
+        r"^(?:hey\s+)?(?:jarvis\s*[,:]?\s*)?"
+        r"(?:can\s+you\s+|could\s+you\s+|would\s+you\s+|will\s+you\s+|please\s+|i\s+want\s+to\s+|i\s+want\s+you\s+to\s+|help\s+me\s+|go\s+ahead\s+and\s+|just\s+)*"
+        r"(?:please\s+)?"
+        r"(open|launch|start|run|play|bring\s+up|fire\s+up|close|exit|terminate|kill|shut\s+down|quit|stop)"
+        r"\s+(?:up\s+)?(?:the\s+)?(?:application\s+|app\s+|game\s+|program\s+)?"
+        r"([a-zA-Z0-9\s\.\-_]+?)"
+        r"(?:\s+(?:app|application|game|program))?"
+        r"(?:\s+(?:for\s+me|please|now|right\s+now|on\s+my\s+pc|on\s+my\s+computer|thanks|thank\s+you))*\s*[\.?!]*$",
         clean_lower
     )
-    if app_open_match:
-        app_name = app_open_match.group(1).strip()
-        if (
-            not re.search(r"\.[a-zA-Z0-9]{1,5}$", app_name)
-            and app_name not in ("the", "a", "an", "all", "my", "this", "that", "it", "file", "folder", "directory", "web", "online", "internet")
-            and not any(w in app_name for w in ("what", "how", "why", "when", "who"))
-        ):
-            res = system_utils.open_application(app_name)
-            return {
-                "reply": res["message"],
-                "routed_deterministically": True,
-                "action": "open_app"
-            }
+    if conv_app_match:
+        action_verb = conv_app_match.group(1).lower().strip()
+        app_name = conv_app_match.group(2).strip()
 
-    # 5. Universal Application & Game Closing
-    app_close_match = re.match(
-        r"^(?:close|exit|terminate|kill|shut down|quit|stop)\s+(?:the\s+)?(?:application\s+|app\s+|game\s+|program\s+)?([a-zA-Z0-9\s\.\-_]+?)(?:\s+(?:app|application|game|program))?\s*$",
-        clean_lower
-    )
-    if app_close_match:
-        app_name = app_close_match.group(1).strip()
-        if (
-            app_name not in ("the", "a", "an", "all", "my", "this", "that", "it", "file", "folder", "directory", "window", "tab")
-            and not any(w in app_name for w in ("what", "how", "why", "when", "who"))
-        ):
-            res = system_utils.close_application(app_name)
-            return {
-                "reply": res["message"],
-                "routed_deterministically": True,
-                "action": "close_app"
-            }
+        # Ensure target is not a folder, file, question word, or empty filler
+        is_folder = app_name in ("downloads", "documents", "desktop", "onedrive", "pictures", "videos", "music")
+        is_file = bool(re.search(r"\.[a-zA-Z0-9]{1,5}$", app_name))
+        is_filler = app_name in ("the", "a", "an", "all", "my", "this", "that", "it", "file", "folder", "directory", "web", "online", "internet", "window", "tab")
+        is_question = any(app_name.startswith(q) for q in ("what", "how", "why", "when", "who"))
+
+        if not is_folder and not is_file and not is_filler and not is_question:
+            if action_verb in ("close", "exit", "terminate", "kill", "shut down", "shut_down", "quit", "stop"):
+                # Only close if known app or running process exists
+                if system_utils.find_app_target(app_name) or system_utils.find_running_process(app_name):
+                    res = system_utils.close_application(app_name)
+                    return {
+                        "reply": res["message"],
+                        "routed_deterministically": True,
+                        "action": "close_app"
+                    }
+            else:
+                # Check if the target is actually an installed app or alias
+                target_app = system_utils.find_app_target(app_name)
+                if target_app:
+                    res = system_utils.open_application(app_name)
+                    return {
+                        "reply": res["message"],
+                        "routed_deterministically": True,
+                        "action": "open_app"
+                    }
+                else:
+                    # Target is NOT in installed apps!
+                    # Only return "not installed" if user EXPLICITLY requested an app/application/program/game!
+                    if re.search(r"\b(?:app|application|program|game|software)\b", clean_lower):
+                        res = system_utils.open_application(app_name)
+                        return {
+                            "reply": res["message"],
+                            "routed_deterministically": True,
+                            "action": "open_app_not_found"
+                        }
+                    # Otherwise, DO NOT say "not installed"! Fall through to other routers or LLM!
 
     # 6. Direct Directory Listing
     list_match = re.match(

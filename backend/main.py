@@ -34,6 +34,13 @@ async def lifespan(app: FastAPI):
         print("[Jarvis] Offline Sherpa-ONNX Zipformer STT engine loaded and ready.")
     else:
         print("[Jarvis] WARNING: Offline STT model not loaded. Check data/models path.")
+    # Ensure installed applications are indexed in the background
+    try:
+        from app.tools.system_utils import ensure_apps_indexed_background
+        ensure_apps_indexed_background()
+    except Exception as e:
+        logger.warning(f"Could not initialize installed apps index: {e}")
+
     yield
 
 app = FastAPI(title="Jarvis API", version="1.0.0", lifespan=lifespan)
@@ -41,7 +48,15 @@ app = FastAPI(title="Jarvis API", version="1.0.0", lifespan=lifespan)
 # CORS configuration for frontend dev server
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

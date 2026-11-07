@@ -134,6 +134,8 @@ export const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [conversationId, setConversationId] = useState<string | undefined>(undefined);
+  const conversationIdRef = useRef<string | undefined>(undefined);
+  const executeMessageRef = useRef<(raw: string) => Promise<void>>(async () => {});
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [isConversationsLoading, setIsConversationsLoading] = useState(true);
   const [conversationsError, setConversationsError] = useState<string | null>(null);
@@ -406,7 +408,7 @@ export const App: React.FC = () => {
           setLiveTranscript(trimmed);
           if (isFinal && trimmed && !sentRef.current) {
             sentRef.current = true;
-            executeMessage(trimmed);
+            executeMessageRef.current(trimmed);
           }
         },
         onError: (err) => {
@@ -468,7 +470,7 @@ export const App: React.FC = () => {
       transcriptRef.current = '';
       if (said && !sentRef.current) {
         sentRef.current = true;
-        executeMessage(said);
+        executeMessageRef.current(said);
       }
     };
 
@@ -531,6 +533,7 @@ export const App: React.FC = () => {
           text: msg.content,
         })),
       );
+      conversationIdRef.current = selectedId;
       setConversationId(selectedId);
       setLatestLatency(null);
     } catch (error: unknown) {
@@ -547,6 +550,7 @@ export const App: React.FC = () => {
     transcriptRef.current = '';
     stopSpeaking();
     stopListening();
+    conversationIdRef.current = undefined;
     setConversationId(undefined);
     setMessages([]);
     setLatestLatency(null);
@@ -576,11 +580,12 @@ export const App: React.FC = () => {
     const started = performance.now();
     let acc = '';
     let failed = false;
+    const activeConvId = conversationIdRef.current ?? null;
 
     try {
       await streamChatMessage(
         text,
-        conversationId ?? null,
+        activeConvId,
         (chunk) => {
           acc += chunk;
           setMessages((prev) =>
@@ -588,7 +593,10 @@ export const App: React.FC = () => {
           );
         },
         (meta: StreamMeta) => {
-          setConversationId(meta.conversation_id);
+          if (meta.conversation_id) {
+            conversationIdRef.current = meta.conversation_id;
+            setConversationId(meta.conversation_id);
+          }
           const total = meta.metrics?.total_backend_ms ?? performance.now() - started;
           setLatestLatency(Math.round(total));
         },
@@ -616,6 +624,7 @@ export const App: React.FC = () => {
       loadConversationsList();
     }
   };
+  executeMessageRef.current = executeMessage;
 
   const handleSend = (event: React.FormEvent) => {
     event.preventDefault();

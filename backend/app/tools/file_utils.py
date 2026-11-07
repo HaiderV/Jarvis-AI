@@ -1,5 +1,7 @@
 import os
+import re
 import time
+import subprocess
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from app.core import config
@@ -453,3 +455,92 @@ def open_file_or_folder(path_str: str) -> Dict[str, Any]:
         return {"status": "success", "message": f"Opened file '{resolved_file}'."}
 
     raise FileNotFoundError(f"Could not find file or folder '{path_str}' to open.")
+
+
+def find_and_open_file(filename_query: str, directory: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Locates a file by name (with or without extension) in a target directory
+    or across permitted folders, and opens it using the default Windows viewer.
+    """
+    clean_target = filename_query.strip().strip("'\"")
+    clean_target = re.sub(r"\bfile\b", "", clean_target, flags=re.IGNORECASE).strip()
+    clean_target = re.sub(r"\b(?:in|inside|from)\s+(?:the\s+)?(downloads|documents|desktop|onedrive|pictures|videos|music)\b", "", clean_target, flags=re.IGNORECASE).strip()
+    clean_target = re.sub(r"\b(?:directory|folder)\b", "", clean_target, flags=re.IGNORECASE).strip()
+    
+    if not clean_target:
+        return {"status": "error", "message": "Please specify a file name to open."}
+
+    matched_file: Optional[Path] = None
+    clean_lower = clean_target.lower()
+
+    # 1. If directory specified, look inside that folder first
+    if directory:
+        try:
+            target_folder = resolve_permitted_folder(directory)
+            if target_folder.exists():
+                for item in target_folder.iterdir():
+                    if item.is_file():
+                        if item.name.lower() == clean_lower or item.stem.lower() == clean_lower:
+                            matched_file = item
+                            break
+                if not matched_file:
+                    for item in target_folder.iterdir():
+                        if item.is_file() and (item.name.lower().startswith(clean_lower) or clean_lower in item.name.lower()):
+                            matched_file = item
+                            break
+        except Exception:
+            pass
+
+    # 2. If not found in specified directory, try smart_find_file across permitted directories
+    if not matched_file:
+        matched_file = smart_find_file(clean_target)
+
+    # 3. If still not found, search with stem / prefix across permitted directories
+    if not matched_file:
+        permitted_dirs = config.get_permitted_directories()
+        for root_dir in permitted_dirs:
+            if root_dir.exists():
+                for root, _, files in os.walk(root_dir):
+                    if any(ignored in root for ignored in ("node_modules", ".git", ".venv", "AppData", "__pycache__")):
+                        continue
+                    for f in files:
+                        f_lower = f.lower()
+                        stem_lower = Path(f).stem.lower()
+                        if f_lower == clean_lower or stem_lower == clean_lower or f_lower.startswith(clean_lower) or clean_lower in f_lower:
+                            matched_file = Path(root) / f
+                            break
+                    if matched_file:
+                        break
+            if matched_file:
+                break
+
+    if not matched_file or not matched_file.exists():
+        loc_msg = f" in your {directory.capitalize()} directory" if directory else ""
+        return {
+            "status": "not_found",
+            "message": f"Could not find a file matching '{clean_target}'{loc_msg}. Please check the filename."
+        }
+
+    # Open file with default Windows handler
+    try:
+        os.startfile(str(matched_file))
+        return {
+            "status": "success",
+            "file_name": matched_file.name,
+            "file_path": str(matched_file),
+            "message": f"Successfully opened `{matched_file.name}` from {matched_file.parent.name}."
+        }
+    except Exception:
+        try:
+            subprocess.Popen(f'start "" "{matched_file}"', shell=True)
+            return {
+                "status": "success",
+                "file_name": matched_file.name,
+                "file_path": str(matched_file),
+                "message": f"Successfully opened `{matched_file.name}`."
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Found file `{matched_file.name}`, but could not open it: {e}"
+            }
